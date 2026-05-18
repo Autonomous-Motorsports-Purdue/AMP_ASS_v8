@@ -5,7 +5,7 @@ import numpy as np
 import csv
 class Logger_GPS():
     def __init__(self):
-        start_time = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+        start_time = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
         # self.image_directory = "data/images/" + start_time
         # self.segmented_directory = "data/segmented_images/" +start_time
         self.information_directory= "data/information/"
@@ -35,6 +35,12 @@ class Logger_GPS():
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S.%f')
         rows = [timestamp, lat, lon, steering, throttle, fix, gps_heading, gps_speed, imu_heading, imu_accuracy_deg, fused_x, fused_y, fused_yaw]
         self.csvwriter.writerow(rows)
+        self.csvfile.flush()
+
+    def shutdown(self):
+        if getattr(self, "csvfile", None) is not None and not self.csvfile.closed:
+            self.csvfile.flush()
+            self.csvfile.close()
             
             
         

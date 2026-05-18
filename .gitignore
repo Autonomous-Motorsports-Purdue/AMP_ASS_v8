@@ -5,3 +5,5 @@ data/
 *.whl
 images/
 *.png
+.venv/
+sim_outputs/

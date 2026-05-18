@@ -1,14 +1,10 @@
 import donkeycar as dk
 
-from parts.imu_visualizer import IMUVisualizer
+from parts.gps_pid import SimpleGPSPIDController
 from parts.uart_backup import UART_backup_driver
 from parts.imu import IMU
 from parts.gps import GPS
-from parts.gps_csv import GPS_CSV
-from parts.controller import MPC_Part, ClosedLoopController
-from parts.ekf_localizer import EKFLocalizer
 from parts.gps_to_xy import GPS_to_xy
-from parts.logger2 import Logger2
 from parts.health_check import HealthCheck
 
 # from parts.gps_visualizer import GPSVisualizer
@@ -39,8 +35,7 @@ if __name__ == "__main__":
     V = dk.vehicle.Vehicle()
 
     # Heart beat
-    heartbeat= HealthCheck("192.168.12.25", 6000) # aryamaan has ip 100
-    # just returns true rn
+    heartbeat= HealthCheck("192.168.12.25", 6000) # just returns true rn
     V.add(heartbeat, inputs=[], outputs=["safety/heartbeat"])
 
     # # UART driver
@@ -51,39 +46,28 @@ if __name__ == "__main__":
     imu = IMU("/dev/ttyACM1")
     V.add(imu, inputs=[], outputs=["yaw_rate", "yaw", "a_x", "a_y"], threaded=False) # TODO: make this threaded
 
-    # GPS (replay from CSV instead of live receiver)
     gps = GPS('/dev/ttyACM2')
     V.add(gps, inputs=[], outputs=['lat_raw', 'lon_raw', 'alt', 'fix', 'corr_age', 'hdop', 'sat_count', 'gps_heading'], threaded=True)
 
-    # GPS Visualizer - MACOS WILL FORCEFULLY CRASH THIS IF THREADED IS SET TO TRUE, BUT IT IS NECESSARY FOR REAL-TIME USAGE
-    # gps_visualizer = GPSVisualizer()
-    # V.add(gps_visualizer, inputs=['lat_raw', 'lon_raw', "yaw"], outputs=[], threaded=False)
-    # V.add(IMUVisualizer(), inputs=['yaw_rate', 'yaw', 'a_x', 'a_y'], outputs=[], threaded=True)
-
-    # EKF Localizer
-    """
-    ekf_localizer = EKFLocalizer(init_lat=ref_lat0, init_lon=ref_lon0, imu_rate=10, gps_rate=4)
-    V.add(ekf_localizer, inputs=["a_x", "a_y", "yaw", "lat_raw", "lon_raw"], outputs=["lat", "lon", "v_x", "v_y"], threaded=False)
-    """
-
     # GPS to XY
-    gps_to_xy = GPS_to_xy(ref_lat_deg=ref_lat0, ref_lon_deg=ref_lon0) # BIDC as origin
+    gps_to_xy = GPS_to_xy(ref_lat_deg=ref_lat0, ref_lon_deg=ref_lon0) # first point as origin
     V.add(gps_to_xy, inputs=["lat_raw", "lon_raw"], outputs=["x", "y", "gps_yaw"], threaded=False)
 
     # MPC Controller
     csv_xy_path = args.file_name.split('.')[0] + "_xy" + ".csv"
-    # csv_xy_path = args.file_name
-    mpc_controller = MPC_Part(path_csv=csv_xy_path, horizon=2, dt_mpc=0.1, wheelbase=1.000506, max_steer=np.radians(35))
-    V.add(mpc_controller, inputs=["x", "y", "gps_yaw"], outputs=["controls/desired_yaw_rate", "controls/desired_throttle"], threaded=False)
-
-    # Closed loop IMU controller
-    closed_loop_controller = ClosedLoopController(
-        kp=0.2, ki=0.0, kd=0.0, # TODO: Tune these parameters.
-        wheelbase=1.000506, max_steering_deg=35, steering_scale=1/35.0
+    controller = SimpleGPSPIDController(
+        path_csv=csv_xy_path,
+        lookahead_m=args.lookahead_m,
+        throttle=args.throttle,
+        kp=args.kp,
+        ki=args.ki,
+        kd=args.kd,
     )
-    V.add(closed_loop_controller, inputs=["controls/desired_yaw_rate", "yaw_rate", "controls/desired_throttle"], outputs=["controls/steering", "controls/throttle"], threaded=False)
-
-    #logger = Logger2()
-    #V.add(logger, inputs=["lat", "lon", "v_x", "v_y", "yaw", "a_x", "a_y", "x", "y", "controls/throttle", "controls/steering"], outputs=[], threaded=False)
+    V.add(
+        controller,
+        inputs=["lat_raw", "lon_raw", "yaw"],
+        outputs=["controls/steering", "controls/throttle"],
+        threaded=False,
+    )
 
     V.start(rate_hz=100, max_loop_count=None) # Remove this once we do more.

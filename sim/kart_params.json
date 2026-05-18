@@ -1,0 +1,347 @@
+{
+  "altitude_m": 0.0,
+  "curvature_cubic_inv_m": 0.0,
+  "curvature_gain_inv_m": -0.15298009663471046,
+  "curvature_intercept_inv_m": 0.012480314031610977,
+  "drive_loop_hz": 50.0,
+  "fit_report": {
+    "effective_gps_position_sigma_m": {
+      "3D": 0.3,
+      "NO FIX": 1.0,
+      "RTK FIXED": 0.003,
+      "RTK FLOAT": 0.08
+    },
+    "raw_sensor_noise": {
+      "gps_position_sigma_m": {
+        "3D": 60.204779985742775,
+        "NO FIX": 30.562628690096563,
+        "RTK FIXED": 1.8248994214410237,
+        "RTK FLOAT": 60.3348907717763
+      },
+      "gps_speed_sigma_mps": 0.2696900944405253,
+      "imu_accel_sigma_mps2": 0.1,
+      "imu_accuracy_deg_mean": 10.606727059218253,
+      "imu_accuracy_deg_std": 18.693893603199975,
+      "imu_gyro_sigma_dps": 0.35,
+      "imu_heading_sigma_deg": 16.012127645886164
+    },
+    "speed": {
+      "speed_fit_r2": 0.9390148168153553,
+      "speed_intercept_mps": 0.09437329478172252,
+      "speed_plateaus": [
+        {
+          "kept": true,
+          "speed_mps": 1.144861111111111,
+          "spread_mps": 0.15217893122222215,
+          "throttle": 1400,
+          "weight": 40
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.2120300640000001,
+          "spread_mps": 0.13597222222222238,
+          "throttle": 1500,
+          "weight": 55
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.274020566,
+          "spread_mps": 0.1656638112222224,
+          "throttle": 1550,
+          "weight": 12
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.4351218383441862,
+          "spread_mps": 0.2298050708474913,
+          "throttle": 1700,
+          "weight": 956
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.1781944444444443,
+          "spread_mps": 0.1580215416666666,
+          "throttle": 1750,
+          "weight": 16
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.4518709839725592,
+          "spread_mps": 0.38805900594737003,
+          "throttle": 1800,
+          "weight": 72
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.2938266600000001,
+          "spread_mps": 0.368190786,
+          "throttle": 1850,
+          "weight": 24
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.3182994155555556,
+          "spread_mps": 0.23118055555555572,
+          "throttle": 1900,
+          "weight": 24
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.369449928,
+          "spread_mps": 0.5531915915555556,
+          "throttle": 1950,
+          "weight": 19
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.1067417395555554,
+          "spread_mps": 0.2023647575555556,
+          "throttle": 2000,
+          "weight": 20
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.1669444444444443,
+          "spread_mps": 0.30694444444444446,
+          "throttle": 2050,
+          "weight": 23
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.6932638381750251,
+          "spread_mps": 0.2766856158683438,
+          "throttle": 2100,
+          "weight": 76
+        },
+        {
+          "kept": false,
+          "speed_mps": 1.1274040260000002,
+          "spread_mps": 0.46736780188888916,
+          "throttle": 2150,
+          "weight": 22
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.818300947106339,
+          "spread_mps": 0.4545068257844582,
+          "throttle": 2200,
+          "weight": 62
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.7692541239046247,
+          "spread_mps": 0.3117623377122217,
+          "throttle": 2250,
+          "weight": 791
+        },
+        {
+          "kept": true,
+          "speed_mps": 1.8196925908893495,
+          "spread_mps": 0.20103370465613657,
+          "throttle": 2300,
+          "weight": 61
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.3243400114909343,
+          "spread_mps": 0.3561216216147667,
+          "throttle": 2400,
+          "weight": 65
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.325795983089284,
+          "spread_mps": 0.3564003495445949,
+          "throttle": 2450,
+          "weight": 71
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.4599395415444767,
+          "spread_mps": 0.550559232439513,
+          "throttle": 2550,
+          "weight": 57
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.407540239968074,
+          "spread_mps": 0.4628672997732899,
+          "throttle": 2700,
+          "weight": 96
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.2811111111111106,
+          "spread_mps": 0.1501354736666669,
+          "throttle": 2750,
+          "weight": 46
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.348654515983965,
+          "spread_mps": 0.21987531639854474,
+          "throttle": 2850,
+          "weight": 80
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.3813806440916387,
+          "spread_mps": 0.3499306865138802,
+          "throttle": 2900,
+          "weight": 160
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.5079300161506977,
+          "spread_mps": 0.4176546292893657,
+          "throttle": 2950,
+          "weight": 143
+        },
+        {
+          "kept": true,
+          "speed_mps": 2.494333369020221,
+          "spread_mps": 0.3051350367677903,
+          "throttle": 3000,
+          "weight": 887
+        },
+        {
+          "kept": false,
+          "speed_mps": 1.0727777777777778,
+          "spread_mps": 2.250555555555555,
+          "throttle": 3400,
+          "weight": 43
+        },
+        {
+          "kept": false,
+          "speed_mps": 2.1868934180715174,
+          "spread_mps": 2.1706921126963588,
+          "throttle": 4300,
+          "weight": 74
+        },
+        {
+          "kept": true,
+          "speed_mps": 3.3157361768962077,
+          "spread_mps": 1.7732130446820076,
+          "throttle": 4500,
+          "weight": 220
+        }
+      ],
+      "speed_slope_mps_per_erpm": 0.0007807196721023582
+    },
+    "speed_lag_s": 0.47614097595214844,
+    "steering": {
+      "curvature_gain_inv_m": -0.15298009663471046,
+      "curvature_intercept_inv_m": 0.012480314031610977,
+      "steering_bins": [
+        {
+          "count": 198,
+          "curvature_inv_m": 0.15274442970483998,
+          "steering": -0.8053768829431486
+        },
+        {
+          "count": 359,
+          "curvature_inv_m": 0.13260361762229586,
+          "steering": -0.6834344008098567
+        },
+        {
+          "count": 575,
+          "curvature_inv_m": 0.10663742285530976,
+          "steering": -0.5103730591842689
+        },
+        {
+          "count": 1000,
+          "curvature_inv_m": 0.09408889872529183,
+          "steering": -0.36184514495666176
+        },
+        {
+          "count": 1624,
+          "curvature_inv_m": 0.04679191501744026,
+          "steering": -0.21964921978844026
+        },
+        {
+          "count": 2330,
+          "curvature_inv_m": 0.012901941634205152,
+          "steering": -0.06849554665616814
+        },
+        {
+          "count": 3136,
+          "curvature_inv_m": -0.00046518421579979996,
+          "steering": 0.06605606636203654
+        },
+        {
+          "count": 2522,
+          "curvature_inv_m": -0.015567851740373504,
+          "steering": 0.22228357531113166
+        },
+        {
+          "count": 1618,
+          "curvature_inv_m": -0.04292140644927989,
+          "steering": 0.36343005793730737
+        },
+        {
+          "count": 789,
+          "curvature_inv_m": -0.052960127309328885,
+          "steering": 0.5083670181183424
+        },
+        {
+          "count": 532,
+          "curvature_inv_m": -0.08575435619678384,
+          "steering": 0.6654027953770019
+        },
+        {
+          "count": 218,
+          "curvature_inv_m": -0.12492446944250005,
+          "steering": 0.8059162449453907
+        }
+      ],
+      "steering_delay_s": 0.6799999999999997,
+      "steering_fit_r2": 0.9646172835248897,
+      "steering_trim": 0.0815812926397332
+    }
+  },
+  "gps_fix_probabilities": {
+    "3D": 0.06,
+    "NO FIX": 0.01,
+    "RTK FIXED": 0.9,
+    "RTK FLOAT": 0.03
+  },
+  "gps_heading_sigma_deg": 3.0,
+  "gps_noise_correlation_s": 1.5,
+  "gps_position_sigma_m": {
+    "3D": 0.3,
+    "NO FIX": 1.0,
+    "RTK FIXED": 0.003,
+    "RTK FLOAT": 0.08
+  },
+  "gps_rate_hz": 4.0,
+  "gps_speed_sigma_mps": 0.2696900944405253,
+  "gps_white_noise_fraction": 0.15,
+  "imu_accel_sigma_mps2": 0.1,
+  "imu_accuracy_deg_mean": 10.606727059218253,
+  "imu_accuracy_deg_std": 18.693893603199975,
+  "imu_gyro_sigma_dps": 0.35,
+  "imu_heading_sigma_deg": 16.012127645886164,
+  "imu_rate_hz": 50.0,
+  "max_speed_mps": 5.0,
+  "sim_rate_hz": 200.0,
+  "source_logs": [
+    "data011.csv",
+    "data5.csv",
+    "data6.csv",
+    "data7.csv",
+    "data8.csv",
+    "data9.csv"
+  ],
+  "speed_intercept_mps": 0.09437329478172252,
+  "speed_lag_s": 0.47614097595214844,
+  "speed_slope_mps_per_erpm": 0.0007807196721023582,
+  "start_offset_m": 0.35,
+  "startup_clip_duration_s": 4.0,
+  "startup_clip_throttle": 1500.0,
+  "startup_warmup_loops": 10,
+  "steering_delay_s": 0.6799999999999997,
+  "steering_lag_s": 0.15,
+  "steering_rate_limit_per_s": 4.0,
+  "steering_trim": 0.0815812926397332,
+  "version": 1
+}
