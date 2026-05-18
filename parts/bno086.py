@@ -91,7 +91,7 @@ class BNO086:
         declination=-4.55,
         mount_offset=0.0,
         invert=False,
-        poll_delay=0.01,
+        poll_delay=0.0025,
         donkey=True
     ):
         import serial
@@ -179,6 +179,16 @@ class BNO086:
             return [
                 heading, # HEADING
                 field_float(fields, "accuracy_deg"), # ACCURACY
+                ( # LIN_ACCEL
+                    field_float(fields, "lin_ax_mps2", math.nan),
+                    field_float(fields, "lin_ay_mps2", math.nan),
+                    field_float(fields, "lin_az_mps2", math.nan),
+                ),
+                ( # GYRO
+                    field_float(fields, "gx_dps", math.nan),
+                    field_float(fields, "gy_dps", math.nan),
+                    field_float(fields, "gz_dps", math.nan),
+                ), 
             ]
 
 

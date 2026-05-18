@@ -8,6 +8,7 @@ from parts.cte_controller import CTEController
 from parts.threaded_socket_pub_part import ThreadedTelemetryStreamer
 from parts.logger_gps import Logger_GPS
 from parts.bno086 import BNO086
+from parts.heading_fusion import HeadingFusion
 
 import numpy as np
 
@@ -49,23 +50,32 @@ if __name__ == "__main__":
 
     # IMU
     imu = BNO086(port='/dev/ttyACM0')
-    V.add(imu, inputs=[], outputs=['imu_heading', 'imu_accuracy_deg'], threaded=True)
+    V.add(imu, inputs=[], outputs=['imu_heading', 'imu_accuracy_deg', 'imu_lin_accel', 'imu_gyro'], threaded=True)
 
     # GPS to XY
     gps_to_xy = GPS_to_xy(ref_lat_deg=ref_lat0, ref_lon_deg=ref_lon0) # first point as origin
     V.add(gps_to_xy, inputs=["lat_raw", "lon_raw"], outputs=["x", "y", "gps_yaw"], threaded=False)
 
+    heading_fusion = HeadingFusion()
+    V.add(
+        heading_fusion,
+        inputs=["x", "y", "gps_yaw", "gps_speed_mps", "imu_heading", "imu_accuracy_deg", "imu_lin_accel", "imu_gyro"],
+        outputs=["fused_x", "fused_y", "fused_yaw"],
+        threaded=False,
+    )
+
     # PID Controller
     # NOTE: must include "_throttle", with hardcoded throttle labels.
     csv_xy_path = args.file_name.split('.')[0] + "_xy_throttle" + ".csv"
     throttle = 2500
-    kp, ki, kd = 0.4, 0.0, 0.3
-    controller = CTEController(path_csv=csv_xy_path, throttle=throttle, kp=kp, ki=ki, kd=kd)
+    kp, ki, kd = 0.3, 0.0, 0.3
+    y_kp, y_ki, y_kd = 0.001, 0.0, 0.000001
+    controller = CTEController(path_csv=csv_xy_path, throttle=throttle, kp=kp, ki=ki, kd=kd, kp_tangent=y_kp, ki_tangent=y_ki, kd_tangent=y_kd)
 
-    V.add(controller, inputs=["x", "y", "gps_yaw"], outputs=["controls/throttle", "controls/steering"], threaded=False)
+    V.add(controller, inputs=["fused_x", "fused_y", "fused_yaw"], outputs=["controls/throttle", "controls/steering"], threaded=False)
 
-    V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','imu_heading', 'controls/steering'])
+    V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','fused_yaw', 'controls/steering'])
 
-    V.add(Logger_GPS(), inputs=['lat_raw','lon_raw', 'controls/steering', 'controls/throttle', 'fix', 'gps_heading', 'gps_speed_mps', 'imu_heading', 'imu_accuracy_deg'], outputs=[])
+    V.add(Logger_GPS(), inputs=['lat_raw','lon_raw', 'controls/steering', 'controls/throttle', 'fix', 'gps_heading', 'gps_speed_mps', 'imu_heading', 'imu_accuracy_deg', 'fused_x', 'fused_y', 'fused_yaw'], outputs=[])
 
     V.start(rate_hz=50, max_loop_count=None)

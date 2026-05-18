@@ -15,13 +15,13 @@ from pathlib import Path
 import numpy as np
 
 # --- tuning ---
-THROTTLE_STRAIGHT = 2500  # PWM on essentially straight lookahead
-THROTTLE_MAX_CURVE = 1500  # PWM when lookahead hits the tightest parts of this track
+THROTTLE_STRAIGHT = 3800  # PWM on essentially straight lookahead
+THROTTLE_MAX_CURVE = 2000  # PWM when lookahead hits the tightest parts of this track
 LOOKAHEAD = 10.0  # meters along the closed polyline ahead of each vertex
 
 # Use percentiles of lookahead kappa on *this* CSV so mild bend ≠ half throttle.
 STRAIGHT_KAPPA_QUANTILE = 0.28  # below this → near full THROTTLE_STRAIGHT
-CURVE_KAPPA_QUANTILE = 0.70  # above this → near THROTTLE_MAX_CURVE
+CURVE_KAPPA_QUANTILE = 0.75 # above this → near THROTTLE_MAX_CURVE
 # > 1 keeps PWM closer to straight until kappa approaches CURVE end of range.
 CURVE_SHARPNESS = 1.2 
 # --------------

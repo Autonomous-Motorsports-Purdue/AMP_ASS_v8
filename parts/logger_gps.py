@@ -23,17 +23,17 @@ class Logger_GPS():
         self.csvwriter = csv.writer(self.csvfile)
 
         # fields = ['timestamp', 'image', 'segmented', 'centroid', 'steering', 'throttle']
-        fields = ['timestamp', 'latitude', 'longitude', 'steering', 'throttle', 'fix', 'gps_heading', 'gps_speed', 'imu_heading', 'imu_accuracy_deg']
+        fields = ['timestamp', 'latitude', 'longitude', 'steering', 'throttle', 'fix', 'gps_heading', 'gps_speed', 'imu_heading', 'imu_accuracy_deg', 'fused_x', 'fused_y', 'fused_yaw']
         # Writing the fields
         self.csvwriter.writerow(fields)
         
-    def run(self, lat, lon, steering, throttle, fix, gps_heading, gps_speed, imu_heading, imu_accuracy_deg):
+    def run(self, lat, lon, steering, throttle, fix, gps_heading, gps_speed, imu_heading, imu_accuracy_deg, fused_x, fused_y, fused_yaw):
         """
         Logs the current image, segmented Image, centroid, steering, and throttle values.
         Saves the images in their respective directory and logs the image paths and other data into a CSV.
         """
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S.%f')
-        rows = [timestamp, lat, lon, steering, throttle,fix, gps_heading, gps_speed, imu_heading, imu_accuracy_deg]    
+        rows = [timestamp, lat, lon, steering, throttle, fix, gps_heading, gps_speed, imu_heading, imu_accuracy_deg, fused_x, fused_y, fused_yaw]
         self.csvwriter.writerow(rows)
             
             

@@ -6,6 +6,9 @@ import logging
 
 # Helper Classes
 
+def normalize_angle_deg(angle):
+    return (angle + 180.0) % 360.0 - 180.0
+
 # donkeycar/parts/transform.py
 class PIDController:
     """ Performs a PID computation and returns a control value.
@@ -29,6 +32,7 @@ class PIDController:
         self.prev_tm = time.time()
         self.prev_feedback = 0
         self.error = None
+        self.integral = 0
 
         # initialize the output
         self.alpha = 0
@@ -52,7 +56,8 @@ class PIDController:
         curr_alpha += self.Kp * error
 
         # Add integral component.
-        curr_alpha += self.Ki * (error * dt)
+        self.integral += error * dt
+        curr_alpha += self.Ki * self.integral
 
         # Add differential component (avoiding divide-by-zero).
         if dt > 0:
@@ -189,7 +194,7 @@ class CTE(object):
     def run(self, path, x, y, from_pt=None):
         """
         Run cross track error algorithm
-        :return: cross-track-error and index of nearest point on the path
+        :return: cross-track-error, index of nearest point, and segment endpoints
         """
         cte = 0.
         i = from_pt
@@ -213,12 +218,23 @@ class CTE(object):
             cte = err.mag() * sign            
         else:
             logging.info(f"no nearest point to ({x},{y}))")
-        return cte, i
+        return cte, i, a, b
     
 class CTEController:
-    def __init__(self, path_csv, throttle=1000, kp=0.5, ki=0.0, kd=0.0):
+    def __init__(
+        self,
+        path_csv,
+        throttle=1000,
+        kp=0.5,
+        ki=0.0,
+        kd=0.0,
+        kp_tangent=0.01,
+        ki_tangent=0.0,
+        kd_tangent=0.002,
+    ):
         self.cte = CTE(look_ahead=3, look_behind=1)
         self.pid = PIDController(p=kp, i=ki, d=kd, debug=False)
+        self.tangent_pid = PIDController(p=kp_tangent, i=ki_tangent, d=kd_tangent, debug=False)
         a = np.genfromtxt(path_csv, delimiter=',', dtype=float, encoding='utf-8', skip_header=0)
         if a.ndim == 1:
             a = np.reshape(a, (1, -1))
@@ -232,23 +248,49 @@ class CTEController:
         self.throttle = throttle
 
     def run(self, x, y, yaw):
-        cte, idx = self.cte.run(self.path_xy, x, y)
-        steer = self.pid.run(0.0, cte) # we desire 0 cte
+        cte, idx, a, b = self.cte.run(self.path_xy, x, y)
+        cte_steer = self.pid.run(0.0, cte) # we desire 0 cte
         
-        steer *= -1
+        cte_steer *= -1
+
+        tangent_steer = 0.0
+        line_diff_deg = None
+        tangent_deg = None
+        if yaw is not None and type(a) == np.ndarray and type(b) == np.ndarray and np.isfinite(float(yaw)):
+            tangent_deg = float(np.degrees(np.arctan2(b[1] - a[1], b[0] - a[0])))
+            line_diff_deg = normalize_angle_deg(tangent_deg - float(yaw))
+            tangent_steer = self.tangent_pid.run(0.0, line_diff_deg)
+            tangent_steer *= -1
+
+        steer = cte_steer + tangent_steer
         steer = np.clip(steer,-1,1)
         if abs(steer) < 0.02:
             steer = 0
         # print(f"[CTEController] Reversing steer")
         print('[CTEController] CTE:', round(cte, 4))
+        if line_diff_deg is not None:
+            print(
+                '[CTEController] tangent:',
+                round(tangent_deg, 2),
+                'yaw:',
+                round(float(yaw), 2),
+                'line_diff:',
+                round(line_diff_deg, 2),
+                'cte_steer:',
+                round(float(cte_steer), 4),
+                'tangent_steer:',
+                round(float(tangent_steer), 4),
+                'steer:',
+                round(float(steer), 4),
+            )
 
         if self.pwm_table is not None:
             i = 0 if idx is None else int(idx) % len(self.pwm_table)
             throttle = int(self.pwm_table[i])
         else:
             STEER_THRESHOLD = 0.2
-            HIGH = 2600
-            LOW = 1400
+            HIGH = 1000 # 2600
+            LOW = 1000 # 1400
             if np.abs(steer) < STEER_THRESHOLD:
                 throttle = int(HIGH - ((HIGH - LOW) / STEER_THRESHOLD * np.abs(steer)))
             else:
