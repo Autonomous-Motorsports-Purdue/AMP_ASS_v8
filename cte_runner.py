@@ -9,6 +9,8 @@ from parts.threaded_socket_pub_part import ThreadedTelemetryStreamer
 from parts.logger_gps import Logger_GPS
 from parts.bno086 import BNO086
 from parts.heading_fusion import HeadingFusion
+from parts.loop_clock import LoopClock
+from parts.gstreamer_video_sync import GStreamerUvcRecorder
 
 import numpy as np
 
@@ -36,6 +38,29 @@ if __name__ == "__main__":
     ref_lon0 = data[0,1]
 
     V = dk.vehicle.Vehicle()
+
+    V.add(LoopClock(), inputs=[], outputs=["loop/index", "loop/monotonic_ns", "loop/wall_time"])
+
+    video_recorder = GStreamerUvcRecorder(
+        device="/dev/video4",
+        width=1280,
+        height=720,
+        fps=30,
+        source_format="mjpeg",
+    )
+    V.add(
+        video_recorder,
+        inputs=["loop/index", "loop/monotonic_ns", "loop/wall_time"],
+        outputs=[
+            "video/nearest_camera_frame_id",
+            "video/nearest_frame_pts_ns",
+            "video/nearest_frame_monotonic_ns",
+            "video/time_s",
+            "video/delta_loop_to_frame_ms",
+            "video/path",
+        ],
+        threaded=False,
+    )
 
     # Heart beat
     heartbeat= HealthCheck("192.168.12.25", 6000) # just returns true rn
@@ -98,6 +123,33 @@ if __name__ == "__main__":
 
     V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','fused_yaw', 'controls/steering'])
 
-    V.add(Logger_GPS(), inputs=['lat_raw','lon_raw', 'controls/steering', 'controls/throttle', 'fix', 'gps_heading', 'gps_speed_mps', 'imu_heading', 'imu_accuracy_deg', 'fused_x', 'fused_y', 'fused_yaw', 'pp/debug'], outputs=[])
+    V.add(
+        Logger_GPS(),
+        inputs=[
+            'lat_raw',
+            'lon_raw',
+            'controls/steering',
+            'controls/throttle',
+            'fix',
+            'gps_heading',
+            'gps_speed_mps',
+            'imu_heading',
+            'imu_accuracy_deg',
+            'fused_x',
+            'fused_y',
+            'fused_yaw',
+            'pp/debug',
+            'loop/index',
+            'loop/monotonic_ns',
+            'loop/wall_time',
+            'video/nearest_camera_frame_id',
+            'video/nearest_frame_pts_ns',
+            'video/nearest_frame_monotonic_ns',
+            'video/time_s',
+            'video/delta_loop_to_frame_ms',
+            'video/path',
+        ],
+        outputs=[],
+    )
 
     V.start(rate_hz=50, max_loop_count=None)
