@@ -4,7 +4,7 @@ from parts.uart_backup import UART_backup_driver
 from parts.gps import GPS
 from parts.gps_to_xy import GPS_to_xy
 from parts.health_check import HealthCheck
-from parts.cte_controller import CTEController
+from parts.pure_pursuit_controller import PurePursuitController
 from parts.threaded_socket_pub_part import ThreadedTelemetryStreamer
 from parts.logger_gps import Logger_GPS
 from parts.bno086 import BNO086
@@ -64,18 +64,40 @@ if __name__ == "__main__":
         threaded=False,
     )
 
-    # PID Controller
-    # NOTE: must include "_throttle", with hardcoded throttle labels.
+    # Pure Pursuit controller.
+    # NOTE: this still expects the existing "_xy_throttle" path naming convention.
     csv_xy_path = args.file_name.split('.')[0] + "_xy_throttle" + ".csv"
-    throttle = 2500
-    kp, ki, kd = 0.3, 0.0, 0.3
-    y_kp, y_ki, y_kd = 0.001, 0.0, 0.000001
-    controller = CTEController(path_csv=csv_xy_path, throttle=throttle, kp=kp, ki=ki, kd=kd, kp_tangent=y_kp, ki_tangent=y_ki, kd_tangent=y_kd)
+    controller = PurePursuitController(
+        path_csv=csv_xy_path,
+        wheelbase_m=1.05,
+        steer_max_deg=30.0,
+        lookahead_time_s=0.6,
+        min_lookahead_m=4.0,
+        max_lookahead_m=10.0,
+        search_window=80,
+        max_resync_dist_m=15.0,
+        fallback_erpm=1500,
+        throttle_floor_erpm=0,
+        throttle_ceiling_erpm=4500,
+        behind_target_erpm=1200,
+        off_path_slowdown_m=1.5,
+        off_path_stop_m=3.0,
+        off_path_slowdown_erpm=1200,
+        reverse_path=True,
+        curvature_to_steering="empirical",
+        steering_sign=1.0,
+        verbose=True
+    )
 
-    V.add(controller, inputs=["fused_x", "fused_y", "fused_yaw"], outputs=["controls/throttle", "controls/steering"], threaded=False)
+    V.add(
+        controller,
+        inputs=["fused_x", "fused_y", "fused_yaw", "gps_speed_mps"],
+        outputs=["controls/throttle", "controls/steering", "pp/debug"],
+        threaded=False,
+    )
 
     V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','fused_yaw', 'controls/steering'])
 
-    V.add(Logger_GPS(), inputs=['lat_raw','lon_raw', 'controls/steering', 'controls/throttle', 'fix', 'gps_heading', 'gps_speed_mps', 'imu_heading', 'imu_accuracy_deg', 'fused_x', 'fused_y', 'fused_yaw'], outputs=[])
+    V.add(Logger_GPS(), inputs=['lat_raw','lon_raw', 'controls/steering', 'controls/throttle', 'fix', 'gps_heading', 'gps_speed_mps', 'imu_heading', 'imu_accuracy_deg', 'fused_x', 'fused_y', 'fused_yaw', 'pp/debug'], outputs=[])
 
     V.start(rate_hz=50, max_loop_count=None)
