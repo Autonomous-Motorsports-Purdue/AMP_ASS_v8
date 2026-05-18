@@ -91,6 +91,10 @@ class UART_backup_driver:
         # clip throttle to (-100, 100)
         # v = max(-200, min(200, v))
 
+        # clip throttle if first 4 seconds
+        if self._iter < 50 * 4: # 50 hz * 4 sec
+            v = min(v, 1500) # set to 1500 at start
+
         print(f"Throttle: {v}, Steering: {s}")
 
         self.update_velocity(v)
