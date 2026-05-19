@@ -101,6 +101,9 @@ class UART_backup_driver:
         elif self._iter < 50 * 7:
             s = max(-0.5, min(0.5, s)) # limit steering for first 7 seconds
 
+        # clamp steering
+        s = max(-0.8, min(0.8, s)) # HACK: GET RID OF THIS!!!
+
         print(f"Throttle: {v}, Steering: {s}")
 
         self.update_velocity(v)

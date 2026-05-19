@@ -22,6 +22,8 @@ PP_DEBUG_FIELDS = [
     "reverse_path",
     "rejoin_mode",
     "rejoin_dist_m",
+    "rejoin_exit_dist_m",
+    "rejoin_exit_heading_deg",
     "rejoin_lookahead_m",
     "rejoin_steer_gain",
     "resynced_this_cycle",
@@ -80,6 +82,8 @@ class PurePursuitController:
         max_resync_dist_m=15.0,
         resync_dist_m=1.5,
         rejoin_dist_m=None,
+        rejoin_exit_dist_m=0.75,
+        rejoin_exit_heading_deg=25.0,
         rejoin_lookahead_m=2.5,
         rejoin_steer_gain=1.25,
         resync_heading_error_deg=120.0,
@@ -120,6 +124,8 @@ class PurePursuitController:
         self.rejoin_dist_m = float(
             self.resync_dist_m if rejoin_dist_m is None else rejoin_dist_m
         )
+        self.rejoin_exit_dist_m = float(rejoin_exit_dist_m)
+        self.rejoin_exit_heading_deg = float(rejoin_exit_heading_deg)
         self.rejoin_lookahead_m = float(rejoin_lookahead_m)
         self.rejoin_steer_gain = float(rejoin_steer_gain)
         self.resync_heading_error_deg = float(resync_heading_error_deg)
@@ -144,6 +150,7 @@ class PurePursuitController:
 
         self.closest_idx = 0
         self.initial_sync_done = False
+        self.rejoin_active = False
         self.target_behind_counter = 0
         self.last_debug = None
 
@@ -303,8 +310,9 @@ class PurePursuitController:
 
         return closest_idx, float(self.path_x_m[closest_idx]), float(self.path_y_m[closest_idx])
 
-    def _compute_tracking_state(
+    def _compute_tracking_state_for_mode(
         self, x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m
+        , rejoin_mode
     ):
         lookahead_m = float(
             np.clip(
@@ -313,7 +321,6 @@ class PurePursuitController:
                 self.max_lookahead_m,
             )
         )
-        rejoin_mode = bool(closest_dist_m > self.rejoin_dist_m)
         if rejoin_mode:
             lookahead_m = min(lookahead_m, self.rejoin_lookahead_m)
         target_idx, target_x_m, target_y_m = self._pick_lookahead_target(
@@ -345,6 +352,48 @@ class PurePursuitController:
             "y_vehicle": float(y_vehicle),
             "target_behind": bool(target_behind),
         }
+
+    def _resolve_rejoin_mode(self, closest_dist_m, heading_error_deg=None):
+        if not self.rejoin_active:
+            return bool(closest_dist_m > self.rejoin_dist_m)
+
+        if heading_error_deg is None:
+            return True
+
+        return not (
+            closest_dist_m < self.rejoin_exit_dist_m
+            and abs(float(heading_error_deg)) < self.rejoin_exit_heading_deg
+        )
+
+    def _compute_tracking_state(
+        self, x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m
+    ):
+        rejoin_mode = self._resolve_rejoin_mode(closest_dist_m)
+        state = self._compute_tracking_state_for_mode(
+            x_m,
+            y_m,
+            yaw_deg,
+            yaw_rad,
+            speed_mps,
+            closest_idx,
+            closest_dist_m,
+            rejoin_mode,
+        )
+        resolved_rejoin_mode = self._resolve_rejoin_mode(
+            closest_dist_m, state["heading_error_deg"]
+        )
+        if resolved_rejoin_mode != rejoin_mode:
+            state = self._compute_tracking_state_for_mode(
+                x_m,
+                y_m,
+                yaw_deg,
+                yaw_rad,
+                speed_mps,
+                closest_idx,
+                closest_dist_m,
+                resolved_rejoin_mode,
+            )
+        return state
 
     def _should_force_resync(self, state, target_behind_counter):
         reasons = []
@@ -457,6 +506,7 @@ class PurePursuitController:
         else:
             self.target_behind_counter = candidate_target_behind_counter
 
+        self.rejoin_active = bool(state["rejoin_mode"])
         closest_idx = state["closest_idx"]
         closest_dist_m = state["closest_dist_m"]
         lookahead_m = state["lookahead_m"]
@@ -507,6 +557,8 @@ class PurePursuitController:
             "reverse_path": bool(self.reverse_path),
             "rejoin_mode": bool(rejoin_mode),
             "rejoin_dist_m": float(self.rejoin_dist_m),
+            "rejoin_exit_dist_m": float(self.rejoin_exit_dist_m),
+            "rejoin_exit_heading_deg": float(self.rejoin_exit_heading_deg),
             "rejoin_lookahead_m": float(self.rejoin_lookahead_m),
             "rejoin_steer_gain": float(self.rejoin_steer_gain),
             "resynced_this_cycle": bool(resynced_this_cycle),

@@ -99,17 +99,20 @@ if __name__ == "__main__":
         wheelbase_m=1.05,
         steer_max_deg=30.0,
         lookahead_time_s=0.6,
-        min_lookahead_m=4.0,
-        max_lookahead_m=10.0,
+        min_lookahead_m=3.0,
+        max_lookahead_m=12.0,
         search_window=80,
         max_resync_dist_m=15.0,
+        rejoin_dist_m=2.0,
+        rejoin_lookahead_m=3.0,
+        rejoin_steer_gain=0.4,
         fallback_erpm=1500,
         throttle_floor_erpm=0,
-        throttle_ceiling_erpm=2500,
-        behind_target_erpm=1200,
+        throttle_ceiling_erpm=3000,
+        behind_target_erpm=1500,
         off_path_slowdown_m=1.2,
         off_path_stop_m=3.0,
-        off_path_slowdown_erpm=1200,
+        off_path_slowdown_erpm=1500,
         reverse_path=True,
         curvature_to_steering="empirical",
         steering_sign=1.0,
@@ -123,36 +126,8 @@ if __name__ == "__main__":
         threaded=False,
     )
 
-    V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','fused_yaw', 'controls/steering'])
+    V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','fused_yaw', 'controls/steering','imu_heading'])
 
-    V.add(
-        Logger_GPS(),
-        inputs=[
-            'lat_raw',
-            'lon_raw',
-            'controls/steering',
-            'controls/throttle',
-            'fix',
-            'gps_heading',
-            'gps_speed_mps',
-            'imu_heading',
-            'imu_accuracy_deg',
-            'fused_x',
-            'fused_y',
-            'fused_yaw',
-            'pp/debug',
-            'loop/index',
-            'loop/monotonic_ns',
-            'loop/wall_time',
-            'video/nearest_camera_frame_id',
-            'video/nearest_frame_pts_ns',
-            'video/nearest_frame_monotonic_ns',
-            'video/time_s',
-            'video/delta_loop_to_frame_ms',
-            'video/path',
-        ],
-        outputs=[],
-    )
     V.add(
         Logger_GPS(),
         inputs=[

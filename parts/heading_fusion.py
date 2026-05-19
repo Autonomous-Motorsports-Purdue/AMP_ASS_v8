@@ -94,6 +94,8 @@ class HeadingFusion:
     def _init_state(self, gps_x, gps_y, gps_yaw_deg, gps_speed_mps, imu_heading, imu_accuracy_deg):
         if not is_valid_number(gps_x) or not is_valid_number(gps_y):
             return False
+        if gps_x == 0.0 and gps_y == 0.0:
+            return False
 
         imu_yaw_deg = self._imu_yaw(imu_heading, imu_accuracy_deg)
         yaw_deg = imu_yaw_deg
