@@ -70,7 +70,7 @@ class UART_backup_driver:
         if not alive:
             self.reset_kart()
             return
-        if self._iter < 10:
+        if self._iter < 5:
             print("warming up kart -- not moving")
             self.reset_kart()
         self._iter += 1 # increment iteration. 
@@ -91,9 +91,15 @@ class UART_backup_driver:
         # clip throttle to (-100, 100)
         # v = max(-200, min(200, v))
 
-        # clip throttle if first 4 seconds
-        if self._iter < 50 * 4: # 50 hz * 4 sec
+        # clip throttle if first 5 seconds
+        if self._iter < 50 * 5: # 50 hz * 5 sec
             v = min(v, 1500) # set to 1500 at start
+        # go forward if first 5 seconds
+        if self._iter < 50 * 5:
+            s = 0.
+        # limit steering if first 7 seconds
+        elif self._iter < 50 * 7:
+            s = max(-0.5, min(0.5, s)) # limit steering for first 7 seconds
 
         print(f"Throttle: {v}, Steering: {s}")
 

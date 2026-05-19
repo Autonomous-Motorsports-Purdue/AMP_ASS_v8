@@ -1,7 +1,5 @@
 import datetime
-import cv2
 import os
-import numpy as np
 import csv
 import json
 
@@ -39,6 +37,15 @@ class Logger_GPS():
             'fused_x',
             'fused_y',
             'fused_yaw',
+            'loop_index',
+            'loop_monotonic_ns',
+            'loop_wall_time',
+            'video_nearest_camera_frame_id',
+            'video_nearest_frame_pts_ns',
+            'video_nearest_frame_monotonic_ns',
+            'video_time_s',
+            'video_delta_loop_to_frame_ms',
+            'video_path',
             'pp_debug_json',
         ]
         self.pp_debug_fields = [f'pp_{field}' for field in PP_DEBUG_FIELDS]
@@ -48,7 +55,31 @@ class Logger_GPS():
         # Writing the fields
         self.csvwriter.writeheader()
         
-    def run(self, lat, lon, steering, throttle, fix, gps_heading, gps_speed, imu_heading, imu_accuracy_deg, fused_x, fused_y, fused_yaw, pp_debug):
+    def run(
+        self,
+        lat,
+        lon,
+        steering,
+        throttle,
+        fix,
+        gps_heading,
+        gps_speed,
+        imu_heading,
+        imu_accuracy_deg,
+        fused_x,
+        fused_y,
+        fused_yaw,
+        pp_debug,
+        loop_index=None,
+        loop_monotonic_ns=None,
+        loop_wall_time=None,
+        video_nearest_camera_frame_id=None,
+        video_nearest_frame_pts_ns=None,
+        video_nearest_frame_monotonic_ns=None,
+        video_time_s=None,
+        video_delta_loop_to_frame_ms=None,
+        video_path=None,
+    ):
         """
         Logs the current image, segmented Image, centroid, steering, and throttle values.
         Saves the images in their respective directory and logs the image paths and other data into a CSV.
@@ -68,6 +99,15 @@ class Logger_GPS():
             'fused_x': fused_x,
             'fused_y': fused_y,
             'fused_yaw': fused_yaw,
+            'loop_index': loop_index,
+            'loop_monotonic_ns': loop_monotonic_ns,
+            'loop_wall_time': loop_wall_time,
+            'video_nearest_camera_frame_id': video_nearest_camera_frame_id,
+            'video_nearest_frame_pts_ns': video_nearest_frame_pts_ns,
+            'video_nearest_frame_monotonic_ns': video_nearest_frame_monotonic_ns,
+            'video_time_s': video_time_s,
+            'video_delta_loop_to_frame_ms': video_delta_loop_to_frame_ms,
+            'video_path': video_path,
             'pp_debug_json': json.dumps(pp_debug, sort_keys=True) if isinstance(pp_debug, dict) else '',
         }
 
@@ -79,6 +119,7 @@ class Logger_GPS():
                 row[f'pp_{field}'] = ''
 
         self.csvwriter.writerow(row)
+        self.csvfile.flush()
             
             
         

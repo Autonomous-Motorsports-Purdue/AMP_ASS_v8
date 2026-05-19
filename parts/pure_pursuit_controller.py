@@ -20,6 +20,10 @@ def normalize_angle_deg(angle_deg):
 
 PP_DEBUG_FIELDS = [
     "reverse_path",
+    "rejoin_mode",
+    "rejoin_dist_m",
+    "rejoin_lookahead_m",
+    "rejoin_steer_gain",
     "resynced_this_cycle",
     "resync_reason",
     "target_behind_counter",
@@ -75,6 +79,9 @@ class PurePursuitController:
         search_window=80,
         max_resync_dist_m=15.0,
         resync_dist_m=1.5,
+        rejoin_dist_m=None,
+        rejoin_lookahead_m=2.5,
+        rejoin_steer_gain=1.25,
         resync_heading_error_deg=120.0,
         target_behind_resync_cycles=3,
         fallback_erpm=1500,
@@ -110,6 +117,11 @@ class PurePursuitController:
         self.search_window = int(search_window)
         self.max_resync_dist_m = float(max_resync_dist_m)
         self.resync_dist_m = float(resync_dist_m)
+        self.rejoin_dist_m = float(
+            self.resync_dist_m if rejoin_dist_m is None else rejoin_dist_m
+        )
+        self.rejoin_lookahead_m = float(rejoin_lookahead_m)
+        self.rejoin_steer_gain = float(rejoin_steer_gain)
         self.resync_heading_error_deg = float(resync_heading_error_deg)
         self.target_behind_resync_cycles = max(1, int(target_behind_resync_cycles))
         self.fallback_erpm = int(fallback_erpm)
@@ -301,6 +313,9 @@ class PurePursuitController:
                 self.max_lookahead_m,
             )
         )
+        rejoin_mode = bool(closest_dist_m > self.rejoin_dist_m)
+        if rejoin_mode:
+            lookahead_m = min(lookahead_m, self.rejoin_lookahead_m)
         target_idx, target_x_m, target_y_m = self._pick_lookahead_target(
             closest_idx, lookahead_m
         )
@@ -318,6 +333,7 @@ class PurePursuitController:
         return {
             "closest_idx": int(closest_idx),
             "closest_dist_m": float(closest_dist_m),
+            "rejoin_mode": bool(rejoin_mode),
             "lookahead_m": float(lookahead_m),
             "target_idx": int(target_idx),
             "target_x_m": float(target_x_m),
@@ -332,8 +348,6 @@ class PurePursuitController:
 
     def _should_force_resync(self, state, target_behind_counter):
         reasons = []
-        if state["closest_dist_m"] > self.resync_dist_m:
-            reasons.append("off_path")
         if abs(state["heading_error_deg"]) > self.resync_heading_error_deg:
             reasons.append("heading")
         if target_behind_counter >= self.target_behind_resync_cycles:
@@ -455,6 +469,7 @@ class PurePursuitController:
         x_vehicle = state["x_vehicle"]
         y_vehicle = state["y_vehicle"]
         target_behind = state["target_behind"]
+        rejoin_mode = state["rejoin_mode"]
         if target_behind:
             steer_norm = 0.0 if abs(y_vehicle) < 1e-6 else math.copysign(1.0, y_vehicle)
             bicycle_steering_cmd = float(np.clip(self.steering_sign * steer_norm, -1.0, 1.0))
@@ -463,6 +478,14 @@ class PurePursuitController:
             steer_norm, bicycle_steering_cmd, empirical_steering_cmd = (
                 self._curvature_to_steering_cmd(curvature)
             )
+            if rejoin_mode:
+                steer_norm = float(np.clip(steer_norm * self.rejoin_steer_gain, -1.0, 1.0))
+                bicycle_steering_cmd = float(
+                    np.clip(bicycle_steering_cmd * self.rejoin_steer_gain, -1.0, 1.0)
+                )
+                empirical_steering_cmd = float(
+                    np.clip(empirical_steering_cmd * self.rejoin_steer_gain, -1.0, 1.0)
+                )
 
         throttle_erpm = int(self.target_erpm[target_idx])
         if target_behind:
@@ -482,6 +505,10 @@ class PurePursuitController:
 
         self.last_debug = {
             "reverse_path": bool(self.reverse_path),
+            "rejoin_mode": bool(rejoin_mode),
+            "rejoin_dist_m": float(self.rejoin_dist_m),
+            "rejoin_lookahead_m": float(self.rejoin_lookahead_m),
+            "rejoin_steer_gain": float(self.rejoin_steer_gain),
             "resynced_this_cycle": bool(resynced_this_cycle),
             "resync_reason": "|".join(resync_reasons),
             "target_behind_counter": int(self.target_behind_counter),
