@@ -251,7 +251,7 @@ class CTEController:
 
     def run(self, x, y, yaw):
         if self.prev_cte is not None and abs(self.prev_cte) > 1.5:
-            self.lookahead = 4
+            self.lookahead = 5
         else:
             self.lookahead = 3
         cte, idx, a, b = self.cte.run(self.path_xy, x, y, look_ahead=self.lookahead, look_behind=self.lookbehind)

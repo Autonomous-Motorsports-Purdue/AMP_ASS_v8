@@ -1,5 +1,6 @@
 import serial
 import time
+import os
 
 
 class UART_backup_driver:
@@ -61,7 +62,7 @@ class UART_backup_driver:
         self.ser.write(f"{self.curr_v},{self.curr_s}\r".encode("ascii"))
         self.ser.flush()
 
-    def run(self, v, s, alive):
+    def run(self, v, s, alive, fix):
         """
         Donkeycar compatible run function
         DOnkeycar gives (-1, 1) for steering and (-1, 1) for throttle
@@ -70,10 +71,19 @@ class UART_backup_driver:
         if not alive:
             self.reset_kart()
             return
+        '''
         if self._iter < 5:
             print("warming up kart -- not moving")
             self.reset_kart()
+        '''
         self._iter += 1 # increment iteration. 
+        
+        # Check for RTK Fixed, if NOT, do not go
+        allowed = ["RTK FLOAT", "RTK FIXED"]
+        if (fix is None) or (not [fix.lower() in allowed]):
+            v = 0
+            print("WAITING FOR RTK FIX")
+            os.system("clear")
 
         if s is None:
             s = 0

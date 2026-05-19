@@ -14,6 +14,7 @@ from parts.loop_clock import LoopClock
 from parts.gstreamer_video_sync import GStreamerUvcRecorder
 
 import numpy as np
+import time
 
 '''
 checklist if not working
@@ -69,7 +70,7 @@ if __name__ == "__main__":
 
     # # UART driver
     uart = UART_backup_driver("/dev/ttyACM2")
-    V.add(uart, inputs=["controls/throttle", "controls/steering", "safety/heartbeat"], outputs=[], threaded=False)
+    V.add(uart, inputs=["controls/throttle", "controls/steering", "safety/heartbeat", "fix"], outputs=[], threaded=False)
 
     gps = GPS('/dev/ttyACM1')
     V.add(gps, inputs=[], outputs=['lat_raw', 'lon_raw', 'alt', 'fix', 'corr_age', 'hdop', 'sat_count', 'gps_heading', 'gps_speed_mps'], threaded=True)
