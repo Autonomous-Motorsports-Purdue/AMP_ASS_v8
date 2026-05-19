@@ -5,12 +5,13 @@ from parts.gps import GPS
 from parts.gps_to_xy import GPS_to_xy
 from parts.health_check import HealthCheck
 from parts.pure_pursuit_controller import PurePursuitController
+from parts.cte_controller import CTEController
 from parts.threaded_socket_pub_part import ThreadedTelemetryStreamer
 from parts.logger_gps import Logger_GPS
 from parts.bno086 import BNO086
 from parts.heading_fusion import HeadingFusion
 from parts.loop_clock import LoopClock
-# from parts.gstreamer_video_sync import GStreamerUvcRecorder
+from parts.gstreamer_video_sync import GStreamerUvcRecorder
 
 import numpy as np
 
@@ -41,9 +42,8 @@ if __name__ == "__main__":
 
     V.add(LoopClock(), inputs=[], outputs=["loop/index", "loop/monotonic_ns", "loop/wall_time"])
 
-    '''
     video_recorder = GStreamerUvcRecorder(
-        device="/dev/video4",
+        device="/dev/video0",
         width=1280,
         height=720,
         fps=30,
@@ -62,7 +62,6 @@ if __name__ == "__main__":
         ],
         threaded=False,
     )
-    '''
 
     # Heart beat
     heartbeat= HealthCheck("192.168.12.25", 6000) # just returns true rn
@@ -94,35 +93,25 @@ if __name__ == "__main__":
     # Pure Pursuit controller.
     # NOTE: this still expects the existing "_xy_throttle" path naming convention.
     csv_xy_path = args.file_name.split('.')[0] + "_xy_throttle" + ".csv"
-    controller = PurePursuitController(
-        path_csv=csv_xy_path,
-        wheelbase_m=1.05,
-        steer_max_deg=30.0,
-        lookahead_time_s=0.6,
-        min_lookahead_m=3.0,
-        max_lookahead_m=12.0,
-        search_window=80,
-        max_resync_dist_m=15.0,
-        rejoin_dist_m=2.0,
-        rejoin_lookahead_m=3.0,
-        rejoin_steer_gain=0.4,
-        fallback_erpm=1500,
-        throttle_floor_erpm=0,
-        throttle_ceiling_erpm=3000,
-        behind_target_erpm=1500,
-        off_path_slowdown_m=1.2,
-        off_path_stop_m=3.0,
-        off_path_slowdown_erpm=1500,
-        reverse_path=True,
-        curvature_to_steering="empirical",
-        steering_sign=1.0,
-        verbose=True
+    kp, ki, kd = 0.25, 0, 0.1
+    kp_t, ki_t, kd_t = 0.0, 0.0, 0.0
+    throttle = 2500
+    controller = CTEController(
+        csv_xy_path,
+        throttle,
+        kp,
+        ki,
+        kd,
+        kp_t,
+        ki_t,
+        kd_t
     )
 
     V.add(
         controller,
-        inputs=["fused_x", "fused_y", "fused_yaw", "gps_speed_mps"],
-        outputs=["controls/throttle", "controls/steering", "pp/debug"],
+        # inputs=["fused_x", "fused_y", "fused_yaw", "gps_speed_mps"],
+        inputs=["fused_x", "fused_y", "fused_yaw"],
+        outputs=["controls/throttle", "controls/steering"],
         threaded=False,
     )
 
@@ -143,7 +132,6 @@ if __name__ == "__main__":
             'fused_x',
             'fused_y',
             'fused_yaw',
-            'pp/debug',
             'loop/index',
             'loop/monotonic_ns',
             'loop/wall_time',

@@ -97,12 +97,10 @@ class UART_backup_driver:
         # go forward if first 5 seconds
         if self._iter < 50 * 5:
             s = 0.
-        # limit steering if first 7 seconds
-        elif self._iter < 50 * 7:
-            s = max(-0.5, min(0.5, s)) # limit steering for first 7 seconds
+        # limit steering if first 5 seconds
+        elif self._iter < 50 * 5:
+            s = max(-0.5, min(0.5, s)) # limit steering for first 5s
 
-        # clamp steering
-        s = max(-0.8, min(0.8, s)) # HACK: GET RID OF THIS!!!
 
         print(f"Throttle: {v}, Steering: {s}")
 

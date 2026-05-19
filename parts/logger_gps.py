@@ -46,10 +46,8 @@ class Logger_GPS():
             'video_time_s',
             'video_delta_loop_to_frame_ms',
             'video_path',
-            'pp_debug_json',
         ]
-        self.pp_debug_fields = [f'pp_{field}' for field in PP_DEBUG_FIELDS]
-        self.fields = self.base_fields + self.pp_debug_fields
+        self.fields = self.base_fields 
         self.csvwriter = csv.DictWriter(self.csvfile, fieldnames=self.fields)
 
         # Writing the fields
@@ -69,7 +67,6 @@ class Logger_GPS():
         fused_x,
         fused_y,
         fused_yaw,
-        pp_debug,
         loop_index=None,
         loop_monotonic_ns=None,
         loop_wall_time=None,
@@ -108,15 +105,7 @@ class Logger_GPS():
             'video_time_s': video_time_s,
             'video_delta_loop_to_frame_ms': video_delta_loop_to_frame_ms,
             'video_path': video_path,
-            'pp_debug_json': json.dumps(pp_debug, sort_keys=True) if isinstance(pp_debug, dict) else '',
         }
-
-        if isinstance(pp_debug, dict):
-            for field in PP_DEBUG_FIELDS:
-                row[f'pp_{field}'] = pp_debug.get(field, '')
-        else:
-            for field in PP_DEBUG_FIELDS:
-                row[f'pp_{field}'] = ''
 
         self.csvwriter.writerow(row)
         self.csvfile.flush()

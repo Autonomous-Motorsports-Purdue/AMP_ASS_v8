@@ -191,7 +191,7 @@ class CTE(object):
 
         return (path[a], path[b], i) if a is not None and b is not None else (None, None, None)
 
-    def run(self, path, x, y, from_pt=None):
+    def run(self, path, x, y, look_ahead, look_behind, from_pt=None):
         """
         Run cross track error algorithm
         :return: cross-track-error, index of nearest point, and segment endpoints
@@ -200,8 +200,8 @@ class CTE(object):
         i = from_pt
 
         a, b, i = self.nearest_track(path, x, y, 
-                                     look_ahead=self.look_ahead, look_behind=self.look_behind, 
-                                     from_pt=from_pt, num_pts=self.num_pts)
+                                     look_ahead=look_ahead, look_behind=look_behind, 
+                                     from_pt=from_pt, num_pts=None)
         
         print(f"[CTE]a:{a},b:{b}")
         if type(a) == np.ndarray and type(b) == np.ndarray:
@@ -231,8 +231,9 @@ class CTEController:
         kp_tangent=0.01,
         ki_tangent=0.0,
         kd_tangent=0.002,
-    ):
-        self.cte = CTE(look_ahead=3, look_behind=1)
+    ):  
+        self.lookahead, self.lookbehind = 3, 1
+        self.cte = CTE(look_ahead=self.lookahead, look_behind=self.lookbehind)
         self.pid = PIDController(p=kp, i=ki, d=kd, debug=False)
         self.tangent_pid = PIDController(p=kp_tangent, i=ki_tangent, d=kd_tangent, debug=False)
         a = np.genfromtxt(path_csv, delimiter=',', dtype=float, encoding='utf-8', skip_header=0)
@@ -246,9 +247,15 @@ class CTEController:
             self.path_xy = a[:, :2]
             self.pwm_table = None
         self.throttle = throttle
+        self.prev_cte = None
 
     def run(self, x, y, yaw):
-        cte, idx, a, b = self.cte.run(self.path_xy, x, y)
+        if self.prev_cte is not None and abs(self.prev_cte) > 1.5:
+            self.lookahead = 4
+        else:
+            self.lookahead = 3
+        cte, idx, a, b = self.cte.run(self.path_xy, x, y, look_ahead=self.lookahead, look_behind=self.lookbehind)
+        self.prev_cte = cte
         cte_steer = self.pid.run(0.0, cte) # we desire 0 cte
         
         cte_steer *= -1
