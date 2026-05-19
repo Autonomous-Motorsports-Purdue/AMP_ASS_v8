@@ -153,5 +153,33 @@ if __name__ == "__main__":
         ],
         outputs=[],
     )
+    V.add(
+        Logger_GPS(),
+        inputs=[
+            'lat_raw',
+            'lon_raw',
+            'controls/steering',
+            'controls/throttle',
+            'fix',
+            'gps_heading',
+            'gps_speed_mps',
+            'imu_heading',
+            'imu_accuracy_deg',
+            'fused_x',
+            'fused_y',
+            'fused_yaw',
+            'pp/debug',
+            'loop/index',
+            'loop/monotonic_ns',
+            'loop/wall_time',
+            'video/nearest_camera_frame_id',
+            'video/nearest_frame_pts_ns',
+            'video/nearest_frame_monotonic_ns',
+            'video/time_s',
+            'video/delta_loop_to_frame_ms',
+            'video/path',
+        ],
+        outputs=[],
+    )
 
     V.start(rate_hz=50, max_loop_count=None)
