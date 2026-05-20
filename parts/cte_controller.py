@@ -231,6 +231,11 @@ class CTEController:
         kp_tangent=0.01,
         ki_tangent=0.0,
         kd_tangent=0.002,
+        wheelbase_m=1.05,
+        steer_max_deg=25.0,
+        rejoin_activation_m=2.0,
+        rejoin_deactivation_m=1.0,
+        rejoin_lookahead_m=10.0,
     ):
         self.cte = CTE(look_ahead=3, look_behind=1)
         self.pid = PIDController(p=kp, i=ki, d=kd, debug=False)
@@ -238,16 +243,54 @@ class CTEController:
         a = np.genfromtxt(path_csv, delimiter=',', dtype=float, encoding='utf-8', skip_header=0)
         if a.ndim == 1:
             a = np.reshape(a, (1, -1))
+        
+        # Load Raw Track Data
         if a.shape[1] >= 3 and np.isfinite(a[0, 0]) and np.isfinite(a[0, 1]):
-            self.path_xy = a[:, :2]
-            self.pwm_table = np.asarray(a[:, -1], dtype=int)
+            self.global_path_xy = a[:, :2]
+            self.global_pwm_table = np.asarray(a[:, -1], dtype=int)
         else:
             a = np.genfromtxt(path_csv, delimiter=',', dtype=float, encoding='utf-8', skip_header=1)
-            self.path_xy = a[:, :2]
-            self.pwm_table = None
+            self.global_path_xy = a[:, :2]
+            self.global_pwm_table = None
+            
+        # Rejoin State Setup
+        from parts.rejoin_manager import RejoinManager
+        import math
+        self.global_path_psi_rad = RejoinManager.calculate_heading(self.global_path_xy)
+            
+        # Default Active Pointers
+        self.path_xy = self.global_path_xy
+        self.pwm_table = self.global_pwm_table
         self.throttle = throttle
+        
+        self.rejoin_manager = RejoinManager(
+            wheelbase_m=wheelbase_m, 
+            steer_max_rad=math.radians(steer_max_deg),
+            activation_dist=rejoin_activation_m,
+            deactivation_dist=rejoin_deactivation_m,
+            lookahead_m=rejoin_lookahead_m
+        )
+        self.in_rejoin_mode = False
 
     def run(self, x, y, yaw):
+        import math
+        _, global_closest_idx, global_closest_dist_m = self.cte.nearest_pt(self.global_path_xy, x, y)
+        
+        # 1. Update State via RejoinManager
+        fallback_global_pwm = self.global_pwm_table if self.global_pwm_table is not None else np.full(len(self.global_path_xy), 1500)
+        
+        is_rejoin, rx, ry, _, _, r_pwm = self.rejoin_manager.update_state(
+            x, y, math.radians(yaw) if yaw is not None else 0.0,
+            global_closest_idx, global_closest_dist_m,
+            self.global_path_xy[:, 0], self.global_path_xy[:, 1],
+            self.global_path_psi_rad, fallback_global_pwm
+        )
+        
+        self.path_xy = np.column_stack((rx, ry))
+        self.pwm_table = r_pwm
+        self.in_rejoin_mode = is_rejoin
+        
+        # 2. Standard Core Tracking (Using active pointers self.path_xy)
         cte, idx, a, b = self.cte.run(self.path_xy, x, y)
         cte_steer = self.pid.run(0.0, cte) # we desire 0 cte
         

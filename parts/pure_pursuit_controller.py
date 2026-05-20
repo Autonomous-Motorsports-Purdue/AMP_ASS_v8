@@ -103,11 +103,20 @@ class PurePursuitController:
             raise ValueError(f"PurePursuitController needs at least 3 points: {path_csv}")
 
         self.s_m = line[:, 0]
-        self.path_x_m = line[:, 1]
-        self.path_y_m = line[:, 2]
-        self.path_psi_rad = line[:, 3]
-        self.path_kappa = line[:, 4]
-        self.target_erpm = line[:, 5].astype(int)
+
+        # Keep global references constant
+        self.global_path_x_m = line[:, 1]
+        self.global_path_y_m = line[:, 2]
+        self.global_path_psi_rad = line[:, 3]
+        self.global_path_kappa = line[:, 4]
+        self.global_target_erpm = line[:, 5].astype(int)
+
+        # Active path can be overridden by a Rejoin spline
+        self.path_x_m = self.global_path_x_m
+        self.path_y_m = self.global_path_y_m
+        self.path_psi_rad = self.global_path_psi_rad
+        self.path_kappa = self.global_path_kappa
+        self.target_erpm = self.global_target_erpm
 
         self.wheelbase_m = float(wheelbase_m)
         self.steer_max_rad = math.radians(float(steer_max_deg))
@@ -117,11 +126,9 @@ class PurePursuitController:
         self.search_window = int(search_window)
         self.max_resync_dist_m = float(max_resync_dist_m)
         self.resync_dist_m = float(resync_dist_m)
-        self.rejoin_dist_m = float(
-            self.resync_dist_m if rejoin_dist_m is None else rejoin_dist_m
-        )
-        self.rejoin_lookahead_m = float(rejoin_lookahead_m)
-        self.rejoin_steer_gain = float(rejoin_steer_gain)
+        self.rejoin_dist_m = float(2.0 if rejoin_dist_m is None else rejoin_dist_m)
+        self.rejoin_lookahead_m = float(rejoin_lookahead_m) if rejoin_lookahead_m else 10.0
+        self.rejoin_steer_gain = float(rejoin_steer_gain) if rejoin_steer_gain else 1.0
         self.resync_heading_error_deg = float(resync_heading_error_deg)
         self.target_behind_resync_cycles = max(1, int(target_behind_resync_cycles))
         self.fallback_erpm = int(fallback_erpm)
@@ -146,6 +153,18 @@ class PurePursuitController:
         self.initial_sync_done = False
         self.target_behind_counter = 0
         self.last_debug = None
+        
+        # Setup for Spline-based Rejoin
+        from parts.rejoin_manager import RejoinManager
+        self.rejoin_manager = RejoinManager(
+            wheelbase_m=self.wheelbase_m, 
+            steer_max_rad=self.steer_max_rad,
+            activation_dist=2.0 if rejoin_dist_m is None else rejoin_dist_m,
+            deactivation_dist=1.0,
+            lookahead_m=rejoin_lookahead_m if rejoin_lookahead_m else 10.0
+        )
+        self.in_rejoin_mode = False
+        self.rejoin_steer_gain = float(rejoin_steer_gain) if rejoin_steer_gain else 1.0
 
     @staticmethod
     def _load_raw_path(path_csv):
@@ -271,7 +290,8 @@ class PurePursuitController:
             return self.closest_idx, closest_dist_m
 
         n = len(self.path_x_m)
-        window = (self.closest_idx + np.arange(self.search_window + 1)) % n
+        search_len = min(self.search_window + 1, n)
+        window = (self.closest_idx + np.arange(search_len)) % n
         distances = np.hypot(self.path_x_m[window] - x_m, self.path_y_m[window] - y_m)
         best_local = int(np.argmin(distances))
         self.closest_idx = int(window[best_local])
@@ -313,9 +333,6 @@ class PurePursuitController:
                 self.max_lookahead_m,
             )
         )
-        rejoin_mode = bool(closest_dist_m > self.rejoin_dist_m)
-        if rejoin_mode:
-            lookahead_m = min(lookahead_m, self.rejoin_lookahead_m)
         target_idx, target_x_m, target_y_m = self._pick_lookahead_target(
             closest_idx, lookahead_m
         )
@@ -420,6 +437,43 @@ class PurePursuitController:
         yaw_rad = math.radians(yaw_deg)
         speed_mps = max(0.0, float(speed_mps)) if is_valid_number(speed_mps) else 0.0
 
+        # ---- SPLINE REJOIN STATE MACHINE ----
+        # 1) Find position relative to the base global path
+        if not hasattr(self, 'global_closest_idx'):
+            self.global_closest_idx = 0
+            
+        n_g = len(self.global_path_x_m)
+        search_len_g = min(self.search_window + 1, n_g)
+        window_g = (self.global_closest_idx + np.arange(search_len_g)) % n_g
+        dists_g = np.hypot(self.global_path_x_m[window_g] - x_m, self.global_path_y_m[window_g] - y_m)
+        best_g = int(np.argmin(dists_g))
+        self.global_closest_idx = int(window_g[best_g])
+        global_closest_dist_m = float(dists_g[best_g])
+        
+        # 2) State Transitions via RejoinManager
+        is_rejoin, rx, ry, rpsi, rkappa, rerpm = self.rejoin_manager.update_state(
+            x_m, y_m, yaw_rad, 
+            self.global_closest_idx, global_closest_dist_m,
+            self.global_path_x_m, self.global_path_y_m, 
+            self.global_path_psi_rad, self.global_target_erpm, self.global_path_kappa
+        )
+        
+        # Handle index syncing when crossing over boundaries
+        if is_rejoin and not self.in_rejoin_mode:
+            self.closest_idx = 0
+            self.initial_sync_done = True
+        elif not is_rejoin and self.in_rejoin_mode:
+            self.closest_idx = self.global_closest_idx
+            self.initial_sync_done = True
+            
+        self.in_rejoin_mode = is_rejoin
+        self.path_x_m = rx
+        self.path_y_m = ry
+        self.path_psi_rad = rpsi
+        self.path_kappa = rkappa
+        self.target_erpm = rerpm
+
+        # ---- ACTIVE PATH TRACKING ----
         closest_idx, closest_dist_m = self._find_closest_idx_forward(x_m, y_m)
         state = self._compute_tracking_state(
             x_m,
