@@ -94,7 +94,7 @@ if __name__ == "__main__":
     # Pure Pursuit controller.
     # NOTE: this still expects the existing "_xy_throttle" path naming convention.
     csv_xy_path = args.file_name.split('.')[0] + "_xy_throttle" + ".csv"
-    kp, ki, kd = 0.2, 0.0, 0.0 # 0.25, 0, 0.1
+    kp, ki, kd = 0.15, 0.0, 0.0 # 0.25, 0, 0.1
     kp_t, ki_t, kd_t = 0.0, 0.0, 0.0
     throttle = 2500
     controller = CTEController(

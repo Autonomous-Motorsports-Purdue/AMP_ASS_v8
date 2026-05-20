@@ -249,7 +249,7 @@ class CTEController:
         self.prev_cte = None
         self.pred_model = PredictiveModel()
 
-        self.K_STEER = -0.18
+        self.K_STEER = -0.4 # -0.18 is from data
         self.K_BIAS = 0 # 0.018
         self.ff_lookahead_m = 1.0
 
