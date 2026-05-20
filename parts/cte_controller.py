@@ -271,7 +271,7 @@ class CTEController:
 
         steer = cte_steer + tangent_steer
         steer = np.clip(steer,-1,1)
-        if abs(steer) < 0.02:
+        if abs(steer) < 0.04:
             steer = 0
         # print(f"[CTEController] Reversing steer")
         print('[CTEController] CTE:', round(cte, 4))

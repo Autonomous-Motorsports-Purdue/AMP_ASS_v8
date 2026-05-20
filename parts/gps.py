@@ -220,8 +220,6 @@ class GPS:
                 msg_time = getattr(data, "time", None)
                 out["last_msg_time"] = msg_time if msg_time not in ("", None) else out.get("last_msg_time")
 
-                out["speed_mps"] = None
-
                 if identity.endswith("GGA"):
                     lat = self.safe_float(getattr(data, "lat", None), out.get("lat"))
                     lon = self.safe_float(getattr(data, "lon", None), out.get("lon"))

@@ -80,7 +80,7 @@ class UART_backup_driver:
         
         # Check for RTK Fixed, if NOT, do not go
         allowed = ["RTK FLOAT", "RTK FIXED"]
-        if (fix is None) or (not [fix.lower() in allowed]):
+        if (fix is None) or str(fix).strip() not in allowed:
             v = 0
             print("WAITING FOR RTK FIX")
             os.system("clear")
