@@ -103,9 +103,6 @@ if __name__ == "__main__":
         kp,
         ki,
         kd,
-        kp_t,
-        ki_t,
-        kd_t
     )
 
     V.add(

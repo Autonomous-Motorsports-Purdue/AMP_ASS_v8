@@ -231,14 +231,10 @@ class CTEController:
         kp=0.5,
         ki=0.0,
         kd=0.0,
-        kp_tangent=0.01,
-        ki_tangent=0.0,
-        kd_tangent=0.002,
     ):  
         self.lookahead, self.lookbehind = 3, 1
         self.cte = CTE(look_ahead=self.lookahead, look_behind=self.lookbehind)
         self.pid = PIDController(p=kp, i=ki, d=kd, debug=False)
-        self.tangent_pid = PIDController(p=kp_tangent, i=ki_tangent, d=kd_tangent, debug=False)
         a = np.genfromtxt(path_csv, delimiter=',', dtype=float, encoding='utf-8', skip_header=0)
         if a.ndim == 1:
             a = np.reshape(a, (1, -1))
@@ -253,6 +249,58 @@ class CTEController:
         self.prev_cte = None
         self.pred_model = PredictiveModel()
 
+        self.K_STEER = -0.18
+        self.K_BIAS = 0.018
+        self.ff_lookahead_m = 4.0
+
+        self.path_s = self.compute_path_s(self.path_xy)
+        self.path_curvature = self.compute_path_curvature(self.path_xy)
+
+    @staticmethod
+    def compute_path_s(path_xy):
+        n = len(path_xy)
+        s = np.zeros(n, dtype=float)
+        for i in range(1, n):
+            s[i] = s[i - 1] + np.linalg.norm(path_xy[i] - path_xy[i - 1])
+        return s
+
+    @staticmethod
+    def compute_path_curvature(path_xy, stride=3):
+        n = len(path_xy)
+        kappa = np.zeros(n, dtype=float)
+
+        for i in range(n):
+            p0 = path_xy[(i - stride) % n]
+            p1 = path_xy[i]
+            p2 = path_xy[(i + stride) % n]
+
+            a = np.linalg.norm(p1 - p0)
+            b = np.linalg.norm(p2 - p1)
+            c = np.linalg.norm(p2 - p0)
+            if a < 1e-6 or b < 1e-6 or c < 1e-6:
+                continue
+
+            cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0])
+            kappa[i] = 2.0 * cross / (a * b * c)
+
+        window = 9
+        pad = window // 2
+        padded = np.r_[kappa[-pad:], kappa, kappa[:pad]]
+        kernel = np.ones(window) / window
+        return np.convolve(padded, kernel, mode="valid")
+
+    def index_ahead(self, idx, meters):
+        n = len(self.path_xy)
+        dist = 0.0
+        i = int(idx) % n
+
+        while dist < meters:
+            j = (i + 1) % n
+            dist += np.linalg.norm(self.path_xy[j] - self.path_xy[i])
+            i = j
+
+        return i
+
     def run(self, x, y, yaw, gps_speed, gps_heading):
         if self.prev_cte is not None and abs(self.prev_cte) > 1.5:
             self.lookahead = 4
@@ -260,7 +308,7 @@ class CTEController:
             self.lookahead = 3
 
         # One/N step pseudo MPC - predict X/Y N steps into the future
-        N=3
+        N=5
         x_future, y_future = x, y
         x_future, y_future = self.pred_model.run(
             x_future, y_future, gps_speed, gps_heading, dt=N*0.02
@@ -272,16 +320,17 @@ class CTEController:
         
         cte_steer *= -1
 
-        tangent_steer = 0.0
-        line_diff_deg = None
-        tangent_deg = None
-        if yaw is not None and type(a) == np.ndarray and type(b) == np.ndarray and np.isfinite(float(yaw)):
-            tangent_deg = float(np.degrees(np.arctan2(b[1] - a[1], b[0] - a[0])))
-            line_diff_deg = normalize_angle_deg(tangent_deg - float(yaw))
-            tangent_steer = self.tangent_pid.run(0.0, line_diff_deg)
-            tangent_steer *= -1
 
-        steer = cte_steer + tangent_steer
+        # feedforward from precomputed path curvature ahead of current index
+        if idx is None:
+            curvature = 0.0
+        else:
+            curv_idx = self.index_ahead(idx, self.ff_lookahead_m)
+            curvature = float(self.path_curvature[curv_idx])
+        steer_ff = (curvature - self.K_BIAS) / self.K_STEER
+        steer_ff = float(np.clip(steer_ff, -0.4, 0.4))
+
+        steer = cte_steer # + steer_ff
         steer = np.clip(steer,-1,1)
         if abs(steer) < 0.04:
             steer = 0

@@ -81,8 +81,8 @@ class TinyPredictiveModel:
         if any([i is None for i in inputs]):
             return x, y
         else:
-            x_f = x + gps_speed * np.cos(gps_yaw) * dt
-            y_f = y + gps_speed * np.sin(gps_yaw) * dt
+            x_f = x + gps_speed * np.cos(np.deg2rad(gps_yaw)) * dt
+            y_f = y + gps_speed * np.sin(np.deg2rad(gps_yaw)) * dt
             return x_f, y_f
 
 class PredictiveModel:
