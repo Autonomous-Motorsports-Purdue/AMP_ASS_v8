@@ -69,14 +69,14 @@ if __name__ == "__main__":
     V.add(heartbeat, inputs=[], outputs=["safety/heartbeat"])
 
     # # UART driver
-    uart = UART_backup_driver("/dev/ttyACM2")
+    uart = UART_backup_driver("/dev/ttyACM1")
     V.add(uart, inputs=["controls/throttle", "controls/steering", "safety/heartbeat", "fix"], outputs=[], threaded=False)
 
-    gps = GPS('/dev/ttyACM1')
+    gps = GPS('/dev/ttyACM0')
     V.add(gps, inputs=[], outputs=['lat_raw', 'lon_raw', 'alt', 'fix', 'corr_age', 'hdop', 'sat_count', 'gps_heading', 'gps_speed_mps'], threaded=True)
 
     # IMU
-    imu = BNO086(port='/dev/ttyACM0')
+    imu = BNO086(port='/dev/ttyACM2')
     V.add(imu, inputs=[], outputs=['imu_heading', 'imu_accuracy_deg', 'imu_lin_accel', 'imu_gyro'], threaded=True)
 
     # GPS to XY
@@ -110,8 +110,7 @@ if __name__ == "__main__":
 
     V.add(
         controller,
-        # inputs=["fused_x", "fused_y", "fused_yaw", "gps_speed_mps"],
-        inputs=["fused_x", "fused_y", "fused_yaw"],
+        inputs=["fused_x", "fused_y", "fused_yaw", "gps_speed_mps", "gps_yaw"],
         outputs=["controls/throttle", "controls/steering"],
         threaded=False,
     )

@@ -4,6 +4,9 @@ from donkeycar.la import Line3D, Vec3
 from donkeycar.utils import dist
 import logging
 
+from parts.predictive_model import TinyPredictiveModel as PredictiveModel
+
+
 # Helper Classes
 
 def normalize_angle_deg(angle):
@@ -219,7 +222,7 @@ class CTE(object):
         else:
             logging.info(f"no nearest point to ({x},{y}))")
         return cte, i, a, b
-    
+
 class CTEController:
     def __init__(
         self,
@@ -248,13 +251,22 @@ class CTEController:
             self.pwm_table = None
         self.throttle = throttle
         self.prev_cte = None
+        self.pred_model = PredictiveModel()
 
-    def run(self, x, y, yaw):
+    def run(self, x, y, yaw, gps_speed, gps_heading):
         if self.prev_cte is not None and abs(self.prev_cte) > 1.5:
-            self.lookahead = 5
+            self.lookahead = 4
         else:
             self.lookahead = 3
-        cte, idx, a, b = self.cte.run(self.path_xy, x, y, look_ahead=self.lookahead, look_behind=self.lookbehind)
+
+        # One/N step pseudo MPC - predict X/Y N steps into the future
+        N=3
+        x_future, y_future = x, y
+        x_future, y_future = self.pred_model.run(
+            x_future, y_future, gps_speed, gps_heading, dt=N*0.02
+        )
+
+        cte, idx, a, b = self.cte.run(self.path_xy, x_future, y_future, look_ahead=self.lookahead, look_behind=self.lookbehind)
         self.prev_cte = cte
         cte_steer = self.pid.run(0.0, cte) # we desire 0 cte
         
@@ -274,22 +286,6 @@ class CTEController:
         if abs(steer) < 0.04:
             steer = 0
         # print(f"[CTEController] Reversing steer")
-        print('[CTEController] CTE:', round(cte, 4))
-        if line_diff_deg is not None:
-            print(
-                '[CTEController] tangent:',
-                round(tangent_deg, 2),
-                'yaw:',
-                round(float(yaw), 2),
-                'line_diff:',
-                round(line_diff_deg, 2),
-                'cte_steer:',
-                round(float(cte_steer), 4),
-                'tangent_steer:',
-                round(float(tangent_steer), 4),
-                'steer:',
-                round(float(steer), 4),
-            )
 
         if self.pwm_table is not None:
             i = 0 if idx is None else int(idx) % len(self.pwm_table)

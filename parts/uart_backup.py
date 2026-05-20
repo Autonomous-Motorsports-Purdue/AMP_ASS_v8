@@ -1,7 +1,7 @@
 import serial
 import time
 import os
-
+import numpy as np
 
 class UART_backup_driver:
     def __init__(self, port_name: str = "/dev/ttyACM0"):
@@ -14,6 +14,10 @@ class UART_backup_driver:
 
         # sleeping to warm up vesc
         time.sleep(2)
+
+        # Steer rate limiting
+        self.MAX_STEER_DIFF = 0.1
+        self.prev_steer = 0
 
     def __del__(self):
         if self.ser.is_open:
@@ -111,6 +115,10 @@ class UART_backup_driver:
         elif self._iter < 50 * 5:
             s = max(-0.5, min(0.5, s)) # limit steering for first 5s
 
+
+        # slew rate
+        s = np.clip(s, self.prev_steer - self.MAX_STEER_DIFF, self.prev_steer + self.MAX_STEER_DIFF)
+        self.prev_steer = s
 
         print(f"Throttle: {v}, Steering: {s}")
 
