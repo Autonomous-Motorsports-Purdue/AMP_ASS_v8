@@ -1,33 +1,27 @@
-import donkeycar as dk
+import argparse
 
-from parts.uart_backup import UART_backup_driver
+import donkeycar as dk
+import numpy as np
+
+from parts.bno086 import BNO086
+from parts.cte_controller import CTEController
 from parts.gps import GPS
 from parts.gps_to_xy import GPS_to_xy
-from parts.health_check import HealthCheck
-from parts.pure_pursuit_controller import PurePursuitController
-from parts.cte_controller import CTEController
-from parts.threaded_socket_pub_part import ThreadedTelemetryStreamer
-from parts.logger_gps import Logger_GPS
-from parts.bno086 import BNO086
-from parts.heading_fusion import HeadingFusion
-from parts.loop_clock import LoopClock
 from parts.gstreamer_video_sync import GStreamerUvcRecorder
-
-import numpy as np
-import time
+from parts.health_check import HealthCheck
+from parts.heading_fusion import HeadingFusion
+from parts.logger_gps import Logger_GPS
+from parts.loop_clock import LoopClock
+from parts.threaded_socket_pub_part import ThreadedTelemetryStreamer
+from parts.uart_backup import UART_backup_driver
 
 '''
 checklist if not working
 
 1. verify IMU, GPS, Main PCB UART are plugged in.
 2. verify ports for each. should be /dev/tty* or /dev/usb*. unplug to test
-
-run this to download the offline map of WL: 
-```
-python 
-```
 '''
-import argparse
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file_name", help="gps waypoint csv file name")
@@ -64,8 +58,7 @@ if __name__ == "__main__":
         threaded=False,
     )
 
-    # Heart beat
-    heartbeat= HealthCheck("192.168.12.25", 6000) # just returns true rn
+    heartbeat = HealthCheck("192.168.12.25", 6000)
     V.add(heartbeat, inputs=[], outputs=["safety/heartbeat"])
 
     # # UART driver
@@ -112,34 +105,36 @@ if __name__ == "__main__":
         threaded=False,
     )
 
-    V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','fused_yaw', 'controls/steering','imu_heading'])
+    V.add(ThreadedTelemetryStreamer(), inputs=['lat_raw','lon_raw','fused_yaw', 'controls/steering','imu_heading', "fused_lat", "fused_lon"])
 
     V.add(
         Logger_GPS(),
         inputs=[
-            'lat_raw',
-            'lon_raw',
-            'controls/steering',
-            'controls/throttle',
-            'commanded/steering',
-            'commanded/throttle',
-            'fix',
-            'gps_heading',
-            'gps_speed_mps',
-            'imu_heading',
-            'imu_accuracy_deg',
-            'fused_x',
-            'fused_y',
-            'fused_yaw',
-            'loop/index',
-            'loop/monotonic_ns',
-            'loop/wall_time',
-            'video/nearest_camera_frame_id',
-            'video/nearest_frame_pts_ns',
-            'video/nearest_frame_monotonic_ns',
-            'video/time_s',
-            'video/delta_loop_to_frame_ms',
-            'video/path',
+            "lat_raw",
+            "lon_raw",
+            "controls/steering",
+            "controls/throttle",
+            "commanded/steer",
+            "commanded/throttle",
+            "controller/cte",
+            "controller/idx",
+            "fix",
+            "gps_heading",
+            "gps_speed_mps",
+            "imu_heading",
+            "imu_accuracy_deg",
+            "fused_x",
+            "fused_y",
+            "fused_yaw",
+            "loop/index",
+            "loop/monotonic_ns",
+            "loop/wall_time",
+            "video/nearest_camera_frame_id",
+            "video/nearest_frame_pts_ns",
+            "video/nearest_frame_monotonic_ns",
+            "video/time_s",
+            "video/delta_loop_to_frame_ms",
+            "video/path",
         ],
         outputs=[],
     )

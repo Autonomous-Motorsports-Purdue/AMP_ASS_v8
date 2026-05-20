@@ -95,3 +95,29 @@ class GPS_to_xy:
             f"x {x_east_m:.2f} m, y {y_north_m:.2f} m, yaw {yaw_str}"
         )
         return x_east_m, y_north_m, gps_yaw_deg
+
+
+class XY_to_GPS:
+    """Inverse of GPS_to_xy: local east/north meters -> lat/lon degrees."""
+
+    EARTH_RADIUS_M = 6378137.0  # WGS84 equatorial radius
+
+    def __init__(self, ref_lat_deg: float, ref_lon_deg: float):
+        self.ref_lat_deg = float(ref_lat_deg)
+        self.ref_lon_deg = float(ref_lon_deg)
+        self.ref_lat_rad = np.radians(self.ref_lat_deg)
+        self.ref_lon_rad = np.radians(self.ref_lon_deg)
+        self.cos_ref_lat = np.cos(self.ref_lat_rad)
+
+    def to_latlon(self, x_east_m: float, y_north_m: float):
+        """Return (lat_deg, lon_deg) from local east/north meters."""
+        if x_east_m is None or y_north_m is None:
+            return None, None
+        lat_rad = self.ref_lat_rad + (float(y_north_m) / self.EARTH_RADIUS_M)
+        lon_rad = self.ref_lon_rad + (
+            float(x_east_m) / (self.EARTH_RADIUS_M * self.cos_ref_lat)
+        )
+        return float(np.degrees(lat_rad)), float(np.degrees(lon_rad))
+
+    def run(self, x, y):
+        return self.to_latlon(x, y)

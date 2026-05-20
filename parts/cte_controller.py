@@ -301,17 +301,17 @@ class CTEController:
 
         return i
 
-    def run(self, x, y, yaw, gps_speed, gps_heading):
-        if self.prev_cte is not None and abs(self.prev_cte) > 1.5:
-            self.lookahead = 4
-        else:
-            self.lookahead = 3
+    def run(self, x, y, yaw, gps_speed, gps_yaw_math_deg):
+        # if self.prev_cte is not None and abs(self.prev_cte) > 1.5:
+        #    self.lookahead = 4
+        # else:
+        #    self.lookahead = 3
 
         # One/N step pseudo MPC - predict X/Y N steps into the future
         N=0
         x_future, y_future = x, y
         x_future, y_future = self.pred_model.run(
-            x_future, y_future, gps_speed, gps_heading, dt=N*0.02
+            x_future, y_future, gps_speed, gps_yaw_math_deg, dt=N * 0.02
         )
 
         cte, idx, a, b = self.cte.run(self.path_xy, x_future, y_future, look_ahead=self.lookahead, look_behind=self.lookbehind)
@@ -319,7 +319,6 @@ class CTEController:
         cte_steer = self.pid.run(0.0, cte) # we desire 0 cte
         
         cte_steer *= -1
-
 
         # feedforward from precomputed path curvature ahead of current index
         if idx is None:
@@ -330,7 +329,7 @@ class CTEController:
         steer_ff = (curvature - self.K_BIAS) / self.K_STEER
         steer_ff = float(np.clip(steer_ff, -0.4, 0.4))
 
-        steer =  -1 * steer_ff +  cte_steer
+        steer = cte_steer # - steer_ff
         steer = np.clip(steer,-1,1)
         # if abs(steer) < 0.04:
         #     steer = 0
@@ -352,4 +351,4 @@ class CTEController:
         if self.pid.debug:
             print('CTE:', round(cte, 4))
         
-        return throttle, steer
+        return throttle, steer, cte, idx

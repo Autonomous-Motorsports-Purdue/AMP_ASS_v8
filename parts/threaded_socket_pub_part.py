@@ -44,12 +44,12 @@ class ThreadedTelemetryStreamer:
         
         server_socket.close()
 
-    def run(self, lat, lon, heading, steer, imu_heading):
+    def run(self, lat, lon, heading, steer, imu_heading, fused_lat, fused_lon):
         """
         Non-blocking: Call this from your main loop. 
         It puts data in a queue and returns immediately.
         """
-        data = {"lat": lat, "lon": lon, "heading": heading, "steer":steer, "imu_heading":imu_heading}
+        data = {"lat": lat, "lon": lon, "heading": heading, "steer":steer, "imu_heading":imu_heading, "fused_lat":fused_lat, "fused_lon": fused_lon}
         try:
             # If queue is full, remove old data to keep it fresh
             if self.data_queue.full():
