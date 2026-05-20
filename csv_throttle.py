@@ -15,8 +15,8 @@ from pathlib import Path
 import numpy as np
 
 # --- tuning ---
-THROTTLE_STRAIGHT = 1000  # PWM on essentially straight lookahead
-THROTTLE_MAX_CURVE = 1000  # PWM when lookahead hits the tightest parts of this track
+THROTTLE_STRAIGHT = 1500  # PWM on essentially straight lookahead
+THROTTLE_MAX_CURVE = 1500  # PWM when lookahead hits the tightest parts of this track
 LOOKAHEAD = 10.0  # meters along the closed polyline ahead of each vertex
 
 # Use percentiles of lookahead kappa on *this* CSV so mild bend ≠ half throttle.

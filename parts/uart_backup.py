@@ -131,6 +131,8 @@ class UART_backup_driver:
 
         self.write_serial()
 
+        return s, v
+
     def shutdown(self):
         self.reset_kart()
         time.sleep(0.1)

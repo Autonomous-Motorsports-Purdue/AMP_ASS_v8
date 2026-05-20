@@ -250,8 +250,8 @@ class CTEController:
         self.pred_model = PredictiveModel()
 
         self.K_STEER = -0.18
-        self.K_BIAS = 0.018
-        self.ff_lookahead_m = 4.0
+        self.K_BIAS = 0 # 0.018
+        self.ff_lookahead_m = 1.0
 
         self.path_s = self.compute_path_s(self.path_xy)
         self.path_curvature = self.compute_path_curvature(self.path_xy)
@@ -265,7 +265,7 @@ class CTEController:
         return s
 
     @staticmethod
-    def compute_path_curvature(path_xy, stride=3):
+    def compute_path_curvature(path_xy, stride=2):
         n = len(path_xy)
         kappa = np.zeros(n, dtype=float)
 
@@ -283,7 +283,7 @@ class CTEController:
             cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0])
             kappa[i] = 2.0 * cross / (a * b * c)
 
-        window = 9
+        window = 5
         pad = window // 2
         padded = np.r_[kappa[-pad:], kappa, kappa[:pad]]
         kernel = np.ones(window) / window
@@ -308,7 +308,7 @@ class CTEController:
             self.lookahead = 3
 
         # One/N step pseudo MPC - predict X/Y N steps into the future
-        N=5
+        N=0
         x_future, y_future = x, y
         x_future, y_future = self.pred_model.run(
             x_future, y_future, gps_speed, gps_heading, dt=N*0.02
@@ -330,10 +330,10 @@ class CTEController:
         steer_ff = (curvature - self.K_BIAS) / self.K_STEER
         steer_ff = float(np.clip(steer_ff, -0.4, 0.4))
 
-        steer = cte_steer # + steer_ff
+        steer =  -1 * steer_ff +  cte_steer
         steer = np.clip(steer,-1,1)
-        if abs(steer) < 0.04:
-            steer = 0
+        # if abs(steer) < 0.04:
+        #     steer = 0
         # print(f"[CTEController] Reversing steer")
 
         if self.pwm_table is not None:

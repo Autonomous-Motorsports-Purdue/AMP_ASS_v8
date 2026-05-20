@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     # # UART driver
     uart = UART_backup_driver("/dev/ttyACM1")
-    V.add(uart, inputs=["controls/throttle", "controls/steering", "safety/heartbeat", "fix"], outputs=[], threaded=False)
+    V.add(uart, inputs=["controls/throttle", "controls/steering", "safety/heartbeat", "fix"], outputs=['commanded/steer', 'commanded/throttle'], threaded=False)
 
     gps = GPS('/dev/ttyACM0')
     V.add(gps, inputs=[], outputs=['lat_raw', 'lon_raw', 'alt', 'fix', 'corr_age', 'hdop', 'sat_count', 'gps_heading', 'gps_speed_mps'], threaded=True)
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     # Pure Pursuit controller.
     # NOTE: this still expects the existing "_xy_throttle" path naming convention.
     csv_xy_path = args.file_name.split('.')[0] + "_xy_throttle" + ".csv"
-    kp, ki, kd = 0.25, 0, 0.1
+    kp, ki, kd = 0.2, 0.0, 0.0 # 0.25, 0, 0.1
     kp_t, ki_t, kd_t = 0.0, 0.0, 0.0
     throttle = 2500
     controller = CTEController(
@@ -121,6 +121,8 @@ if __name__ == "__main__":
             'lon_raw',
             'controls/steering',
             'controls/throttle',
+            'commanded/steering',
+            'commanded/throttle',
             'fix',
             'gps_heading',
             'gps_speed_mps',
