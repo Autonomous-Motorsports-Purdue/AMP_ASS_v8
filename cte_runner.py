@@ -6,7 +6,7 @@ import numpy as np
 from parts.bno086 import BNO086
 from parts.cte_controller import CTEController
 from parts.gps import GPS
-from parts.gps_to_xy import GPS_to_xy
+from parts.gps_to_xy import GPS_to_xy, XY_to_GPS
 from parts.gstreamer_video_sync import GStreamerUvcRecorder
 from parts.health_check import HealthCheck
 from parts.heading_fusion import HeadingFusion
@@ -76,6 +76,10 @@ if __name__ == "__main__":
     gps_to_xy = GPS_to_xy(ref_lat_deg=ref_lat0, ref_lon_deg=ref_lon0) # first point as origin
     V.add(gps_to_xy, inputs=["lat_raw", "lon_raw"], outputs=["x", "y", "gps_yaw"], threaded=False)
 
+    # XY to GPS
+    XY_to_GPS = XY_to_GPS(ref_lat_deg=ref_lat0, ref_lon_deg=ref_lon0)
+    V.add(XY_to_GPS, inputs=["fused_x", "fused_y"], outputs=["fused_lat", "fused_lon"], threaded=False)
+
     heading_fusion = HeadingFusion()
     V.add(
         heading_fusion,
@@ -87,7 +91,7 @@ if __name__ == "__main__":
     # Pure Pursuit controller.
     # NOTE: this still expects the existing "_xy_throttle" path naming convention.
     csv_xy_path = args.file_name.split('.')[0] + "_xy_throttle" + ".csv"
-    kp, ki, kd = 0.15, 0.0, 0.0 # 0.25, 0, 0.1
+    kp, ki, kd = 0.25, 0.0, 0.1 # 0.25, 0, 0.1
     kp_t, ki_t, kd_t = 0.0, 0.0, 0.0
     throttle = 2500
     controller = CTEController(
