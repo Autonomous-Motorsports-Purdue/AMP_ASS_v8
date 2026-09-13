@@ -100,7 +100,7 @@ class Curve_fit():
                     i -= 1
                
         if True:
-            dbscan = DBSCAN(eps=50, min_samples=5) // TODO: TUNE THIS
+            dbscan = DBSCAN(eps=50, min_samples=5) # TODO: TUNE THIS
             dbscan.fit(points)
             
             # pca = PCA(n_components=2).fit(points)
