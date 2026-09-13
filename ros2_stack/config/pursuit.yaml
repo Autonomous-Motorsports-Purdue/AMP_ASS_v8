@@ -1,0 +1,45 @@
+# Parameters for pursuit.launch.py, mirroring the values in pursuit_runner.py.
+
+health_check:
+  ros__parameters:
+    enabled: false
+    host_ip: 192.168.12.25
+    host_port: 6000
+
+frame_publisher:
+  ros__parameters:
+    device: 0
+    width: 2560
+    height: 720
+    rate_hz: 30.0
+
+onnx:
+  ros__parameters:
+    model_path: ./model.onnx
+    input_name: input.1
+    use_cuda: true
+
+curve_fit:
+  ros__parameters:
+    residual_threshold: 10.0
+
+translate:
+  ros__parameters:
+    calibration_path: zed_calibration_params.bin
+    height: 0.6
+    pitch: 0.0
+
+pure_pursuit:
+  ros__parameters:
+    wheelbase: 1.000506
+    speed: 0.3
+
+control_mux:
+  ros__parameters:
+    user_throttle_scale: 0.7
+    rate_hz: 30.0
+
+uart_backup:
+  ros__parameters:
+    port_name: /dev/ttyACM0
+    rate_hz: 30.0

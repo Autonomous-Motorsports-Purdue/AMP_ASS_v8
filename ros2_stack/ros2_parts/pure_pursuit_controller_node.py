@@ -1,0 +1,735 @@
+#!/usr/bin/env python3
+"""ROS 2 port of parts/pure_pursuit_controller.py.
+
+Minimal GPS pure pursuit. The controller class below is the part's, unchanged;
+the node feeds it the fused pose and publishes what it returns.
+
+Two behaviors sit on top of plain pure pursuit. Rejoin mode shortens the
+lookahead and lifts the steering gain while the kart is off the path, so it
+cuts back rather than easing in over a long arc. A resync throws away the
+forward-only waypoint search and finds the nearest point on the whole path,
+which is what recovers from being turned around or picked up and moved.
+
+subscribes: odometry/filtered (Odometry, fused pose and speed)
+publishes:  cmd/steering (Float64, normalized -1 to 1),
+            cmd/throttle (Float64, eRPM),
+            controller/pure_pursuit_debug (String, JSON, when verbose)
+"""
+
+import json
+import math
+
+import numpy as np
+import rclpy
+from rclpy.node import Node
+from nav_msgs.msg import Odometry
+from std_msgs.msg import Float64, String
+
+from ros2_parts.orientation import normalize_angle_deg, normalize_angle_rad
+from ros2_parts.orientation import quaternion_to_yaw
+from ros2_parts.parameters import declare
+
+
+def is_valid_number(value):
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
+PP_DEBUG_FIELDS = [
+    "reverse_path",
+    "rejoin_mode",
+    "rejoin_dist_m",
+    "rejoin_exit_dist_m",
+    "rejoin_exit_heading_deg",
+    "rejoin_lookahead_m",
+    "rejoin_steer_gain",
+    "resynced_this_cycle",
+    "resync_reason",
+    "target_behind_counter",
+    "resync_dist_m",
+    "resync_heading_error_deg",
+    "closest_idx",
+    "target_idx",
+    "closest_dist_m",
+    "lookahead_m",
+    "yaw_deg",
+    "target_x_m",
+    "target_y_m",
+    "target_heading_deg",
+    "heading_error_deg",
+    "target_kappa",
+    "pp_curvature",
+    "x_vehicle",
+    "y_vehicle",
+    "speed_mps",
+    "target_behind",
+    "curvature_to_steering_mode",
+    "empirical_kappa_slope",
+    "empirical_steering_offset",
+    "bicycle_steering_cmd",
+    "empirical_steering_cmd",
+    "selected_steering_cmd",
+    "throttle_erpm",
+    "steering_norm",
+]
+
+
+class PurePursuitController:
+    """
+    Minimal GPS Pure Pursuit controller.
+
+    Inputs:
+        x, y: local ENU position in meters
+        yaw_deg: math-frame yaw, degrees, 0=east, +CCW
+        speed_mps: current vehicle speed estimate
+
+    Outputs:
+        throttle_erpm, steering_norm, pp_debug
+    """
+
+    def __init__(
+        self,
+        path_csv,
+        wheelbase_m=1.05,
+        steer_max_deg=25.0,
+        lookahead_time_s=0.6,
+        min_lookahead_m=4.0,
+        max_lookahead_m=10.0,
+        search_window=80,
+        max_resync_dist_m=15.0,
+        resync_dist_m=1.5,
+        rejoin_dist_m=None,
+        rejoin_exit_dist_m=0.75,
+        rejoin_exit_heading_deg=25.0,
+        rejoin_lookahead_m=2.5,
+        rejoin_steer_gain=1.25,
+        resync_heading_error_deg=120.0,
+        target_behind_resync_cycles=3,
+        fallback_erpm=1500,
+        throttle_floor_erpm=0,
+        throttle_ceiling_erpm=4500,
+        behind_target_erpm=1200,
+        off_path_slowdown_m=1.5,
+        off_path_stop_m=3.0,
+        off_path_slowdown_erpm=1200,
+        reverse_path=False,
+        curvature_to_steering="empirical",
+        empirical_kappa_slope=-0.223,
+        empirical_steering_offset=0.097,
+        steering_sign=1.0,
+        verbose=False,
+    ):
+        line = self._load_line(path_csv, fallback_erpm, reverse_path=reverse_path)
+        if len(line) < 3:
+            raise ValueError(f"PurePursuitController needs at least 3 points: {path_csv}")
+
+        self.s_m = line[:, 0]
+        self.path_x_m = line[:, 1]
+        self.path_y_m = line[:, 2]
+        self.path_psi_rad = line[:, 3]
+        self.path_kappa = line[:, 4]
+        self.target_erpm = line[:, 5].astype(int)
+
+        self.wheelbase_m = float(wheelbase_m)
+        self.steer_max_rad = math.radians(float(steer_max_deg))
+        self.lookahead_time_s = float(lookahead_time_s)
+        self.min_lookahead_m = float(min_lookahead_m)
+        self.max_lookahead_m = float(max_lookahead_m)
+        self.search_window = int(search_window)
+        self.max_resync_dist_m = float(max_resync_dist_m)
+        self.resync_dist_m = float(resync_dist_m)
+        self.rejoin_dist_m = float(
+            self.resync_dist_m if rejoin_dist_m is None else rejoin_dist_m
+        )
+        self.rejoin_exit_dist_m = float(rejoin_exit_dist_m)
+        self.rejoin_exit_heading_deg = float(rejoin_exit_heading_deg)
+        self.rejoin_lookahead_m = float(rejoin_lookahead_m)
+        self.rejoin_steer_gain = float(rejoin_steer_gain)
+        self.resync_heading_error_deg = float(resync_heading_error_deg)
+        self.target_behind_resync_cycles = max(1, int(target_behind_resync_cycles))
+        self.fallback_erpm = int(fallback_erpm)
+        self.throttle_floor_erpm = int(throttle_floor_erpm)
+        self.throttle_ceiling_erpm = int(throttle_ceiling_erpm)
+        self.behind_target_erpm = int(behind_target_erpm)
+        self.off_path_slowdown_m = float(off_path_slowdown_m)
+        self.off_path_stop_m = float(off_path_stop_m)
+        self.off_path_slowdown_erpm = int(off_path_slowdown_erpm)
+        self.reverse_path = bool(reverse_path)
+        self.curvature_to_steering = str(curvature_to_steering).lower()
+        if self.curvature_to_steering not in ("bicycle", "empirical"):
+            raise ValueError(
+                "curvature_to_steering must be 'bicycle' or 'empirical'"
+            )
+        self.empirical_kappa_slope = float(empirical_kappa_slope)
+        self.empirical_steering_offset = float(empirical_steering_offset)
+        self.steering_sign = float(steering_sign)
+        self.verbose = bool(verbose)
+
+        self.closest_idx = 0
+        self.initial_sync_done = False
+        self.rejoin_active = False
+        self.target_behind_counter = 0
+        self.last_debug = None
+
+    @staticmethod
+    def _load_raw_path(path_csv):
+        path = np.genfromtxt(
+            path_csv,
+            delimiter=",",
+            dtype=float,
+            encoding="utf-8",
+            skip_header=0,
+        )
+        if path.ndim == 1:
+            path = np.reshape(path, (1, -1))
+
+        # a non-finite first row means there was a header to skip
+        if not np.isfinite(path[0]).all():
+            path = np.genfromtxt(
+                path_csv,
+                delimiter=",",
+                dtype=float,
+                encoding="utf-8",
+                skip_header=1,
+            )
+            if path.ndim == 1:
+                path = np.reshape(path, (1, -1))
+
+        if path.size == 0 or path.shape[1] < 2:
+            raise ValueError(f"Could not parse XY path from {path_csv}")
+        return np.asarray(path, dtype=float)
+
+    @staticmethod
+    def _looks_like_erpm(values):
+        # eRPM runs in the thousands; a normalized throttle never leaves -1..1
+        finite = np.asarray(values, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if finite.size == 0:
+            return False
+        if np.nanmax(np.abs(finite)) >= 50.0:
+            return True
+        return bool(np.nanmedian(np.abs(finite)) >= 25.0)
+
+    @classmethod
+    def _load_line(cls, path_csv, fallback_erpm, reverse_path=False):
+        raw = cls._load_raw_path(path_csv)
+        if reverse_path:
+            raw = raw[::-1].copy()
+        xy = np.asarray(raw[:, :2], dtype=float)
+        if not np.isfinite(xy).all():
+            raise ValueError(f"Non-finite XY values in {path_csv}")
+
+        n = len(xy)
+        target_erpm = np.full(n, int(fallback_erpm), dtype=int)
+
+        if raw.shape[1] == 3:
+            third = raw[:, 2]
+            if cls._looks_like_erpm(third):
+                target_erpm = np.rint(third).astype(int)
+        elif raw.shape[1] >= 4:
+            target_erpm = np.rint(raw[:, -1]).astype(int)
+
+        s_m = cls._build_path_s(xy)
+        psi_rad = cls._build_path_heading(xy)
+        kappa_radpm = cls._build_path_curvature(xy, psi_rad)
+
+        return np.column_stack(
+            [s_m, xy[:, 0], xy[:, 1], psi_rad, kappa_radpm, target_erpm]
+        )
+
+    @staticmethod
+    def _build_path_s(xy):
+        segment_lengths = np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))
+        return np.concatenate(([0.0], np.cumsum(segment_lengths)))
+
+    @staticmethod
+    def _build_path_heading(xy):
+        n = len(xy)
+        headings = np.zeros(n, dtype=float)
+        for i in range(n):
+            prev_i = (i - 1) % n
+            next_i = (i + 1) % n
+            dx = float(xy[next_i, 0] - xy[prev_i, 0])
+            dy = float(xy[next_i, 1] - xy[prev_i, 1])
+            if math.hypot(dx, dy) < 1e-6:
+                dx = float(xy[next_i, 0] - xy[i, 0])
+                dy = float(xy[next_i, 1] - xy[i, 1])
+            headings[i] = math.atan2(dy, dx)
+        return headings
+
+    @staticmethod
+    def _build_path_curvature(xy, headings):
+        n = len(xy)
+        curvature = np.zeros(n, dtype=float)
+        for i in range(n):
+            prev_i = (i - 1) % n
+            next_i = (i + 1) % n
+            seg_prev = math.hypot(
+                float(xy[i, 0] - xy[prev_i, 0]),
+                float(xy[i, 1] - xy[prev_i, 1]),
+            )
+            seg_next = math.hypot(
+                float(xy[next_i, 0] - xy[i, 0]),
+                float(xy[next_i, 1] - xy[i, 1]),
+            )
+            denom = max(seg_prev + seg_next, 1e-6)
+            dpsi = normalize_angle_rad(headings[next_i] - headings[prev_i])
+            curvature[i] = dpsi / denom
+        return curvature
+
+    def _full_resync_idx(self, x_m, y_m):
+        distances = np.hypot(self.path_x_m - x_m, self.path_y_m - y_m)
+        best_idx = int(np.argmin(distances))
+        return best_idx, float(distances[best_idx])
+
+    def _find_closest_idx_forward(self, x_m, y_m):
+        if not self.initial_sync_done:
+            self.closest_idx, closest_dist_m = self._full_resync_idx(x_m, y_m)
+            self.initial_sync_done = True
+            return self.closest_idx, closest_dist_m
+
+        current_dist_m = math.hypot(
+            float(x_m - self.path_x_m[self.closest_idx]),
+            float(y_m - self.path_y_m[self.closest_idx]),
+        )
+        if current_dist_m > self.max_resync_dist_m:
+            self.closest_idx, closest_dist_m = self._full_resync_idx(x_m, y_m)
+            return self.closest_idx, closest_dist_m
+
+        n = len(self.path_x_m)
+        window = (self.closest_idx + np.arange(self.search_window + 1)) % n
+        distances = np.hypot(self.path_x_m[window] - x_m, self.path_y_m[window] - y_m)
+        best_local = int(np.argmin(distances))
+        self.closest_idx = int(window[best_local])
+        return self.closest_idx, float(distances[best_local])
+
+    def _pick_lookahead_target(self, closest_idx, lookahead_m):
+        n = len(self.path_x_m)
+        remaining = float(lookahead_m)
+        i = int(closest_idx)
+
+        for _ in range(n + 2):
+            j = (i + 1) % n
+            seg_dx = float(self.path_x_m[j] - self.path_x_m[i])
+            seg_dy = float(self.path_y_m[j] - self.path_y_m[i])
+            seg_len = math.hypot(seg_dx, seg_dy)
+
+            if seg_len < 1e-6:
+                i = j
+                continue
+
+            if remaining <= seg_len:
+                ratio = remaining / seg_len
+                target_x_m = float(self.path_x_m[i] + ratio * seg_dx)
+                target_y_m = float(self.path_y_m[i] + ratio * seg_dy)
+                return j, target_x_m, target_y_m
+
+            remaining -= seg_len
+            i = j
+
+        return closest_idx, float(self.path_x_m[closest_idx]), float(self.path_y_m[closest_idx])
+
+    def _compute_tracking_state_for_mode(
+        self, x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m,
+        rejoin_mode
+    ):
+        lookahead_m = float(
+            np.clip(
+                speed_mps * self.lookahead_time_s,
+                self.min_lookahead_m,
+                self.max_lookahead_m,
+            )
+        )
+        if rejoin_mode:
+            lookahead_m = min(lookahead_m, self.rejoin_lookahead_m)
+        target_idx, target_x_m, target_y_m = self._pick_lookahead_target(
+            closest_idx, lookahead_m
+        )
+        _, curvature, x_vehicle, y_vehicle, target_behind = (
+            self._pure_pursuit_steering(
+                x_m,
+                y_m,
+                yaw_rad,
+                target_x_m,
+                target_y_m,
+            )
+        )
+        target_heading_deg = float(np.degrees(self.path_psi_rad[target_idx]))
+        heading_error_deg = normalize_angle_deg(target_heading_deg - yaw_deg)
+        return {
+            "closest_idx": int(closest_idx),
+            "closest_dist_m": float(closest_dist_m),
+            "rejoin_mode": bool(rejoin_mode),
+            "lookahead_m": float(lookahead_m),
+            "target_idx": int(target_idx),
+            "target_x_m": float(target_x_m),
+            "target_y_m": float(target_y_m),
+            "target_heading_deg": float(target_heading_deg),
+            "heading_error_deg": float(heading_error_deg),
+            "curvature": float(curvature),
+            "x_vehicle": float(x_vehicle),
+            "y_vehicle": float(y_vehicle),
+            "target_behind": bool(target_behind),
+        }
+
+    def _resolve_rejoin_mode(self, closest_dist_m, heading_error_deg=None):
+        # rejoin has hysteresis: it starts on distance alone, and only clears
+        # once the kart is both close to the path and pointed along it
+        if not self.rejoin_active:
+            return bool(closest_dist_m > self.rejoin_dist_m)
+
+        if heading_error_deg is None:
+            return True
+
+        return not (
+            closest_dist_m < self.rejoin_exit_dist_m
+            and abs(float(heading_error_deg)) < self.rejoin_exit_heading_deg
+        )
+
+    def _compute_tracking_state(
+        self, x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m
+    ):
+        # the exit test needs a heading error, which needs a target, which
+        # needs the mode: solve once on distance, then again if that flipped it
+        rejoin_mode = self._resolve_rejoin_mode(closest_dist_m)
+        state = self._compute_tracking_state_for_mode(
+            x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m,
+            rejoin_mode,
+        )
+        resolved_rejoin_mode = self._resolve_rejoin_mode(
+            closest_dist_m, state["heading_error_deg"]
+        )
+        if resolved_rejoin_mode != rejoin_mode:
+            state = self._compute_tracking_state_for_mode(
+                x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m,
+                resolved_rejoin_mode,
+            )
+        return state
+
+    def _should_force_resync(self, state, target_behind_counter):
+        reasons = []
+        if abs(state["heading_error_deg"]) > self.resync_heading_error_deg:
+            reasons.append("heading")
+        if target_behind_counter >= self.target_behind_resync_cycles:
+            reasons.append("target_behind")
+        return reasons
+
+    def _pure_pursuit_steering(self, x_m, y_m, yaw_rad, target_x_m, target_y_m):
+        dx = float(target_x_m - x_m)
+        dy = float(target_y_m - y_m)
+
+        cos_yaw = math.cos(yaw_rad)
+        sin_yaw = math.sin(yaw_rad)
+
+        # Vehicle frame: +x forward, +y left.
+        x_vehicle = cos_yaw * dx + sin_yaw * dy
+        y_vehicle = -sin_yaw * dx + cos_yaw * dy
+        lookahead_sq = x_vehicle * x_vehicle + y_vehicle * y_vehicle
+
+        if lookahead_sq < 1e-6:
+            return 0.0, 0.0, x_vehicle, y_vehicle, False
+
+        if x_vehicle <= 0.05:
+            steer_norm = (
+                0.0 if abs(y_vehicle) < 1e-6 else math.copysign(1.0, y_vehicle)
+            )
+            return steer_norm, 0.0, x_vehicle, y_vehicle, True
+
+        curvature = 2.0 * y_vehicle / lookahead_sq
+        return 0.0, curvature, x_vehicle, y_vehicle, False
+
+    def _curvature_to_steering_cmd(self, curvature):
+        if abs(self.steer_max_rad) < 1e-9:
+            bicycle_steering_cmd = 0.0
+        else:
+            bicycle_steering_cmd = math.atan(self.wheelbase_m * curvature) / self.steer_max_rad
+
+        if abs(self.empirical_kappa_slope) < 1e-9:
+            empirical_steering_cmd = self.empirical_steering_offset
+        else:
+            empirical_steering_cmd = (
+                self.empirical_steering_offset
+                + float(curvature) / self.empirical_kappa_slope
+            )
+
+        empirical_steering_cmd = (
+            self.empirical_steering_offset
+            + self.steering_sign
+            * (empirical_steering_cmd - self.empirical_steering_offset)
+        )
+        bicycle_steering_cmd = self.steering_sign * bicycle_steering_cmd
+
+        if self.curvature_to_steering == "empirical":
+            selected_steering_cmd = empirical_steering_cmd
+        else:
+            selected_steering_cmd = bicycle_steering_cmd
+
+        selected_steering_cmd = float(np.clip(selected_steering_cmd, -1.0, 1.0))
+        bicycle_steering_cmd = float(np.clip(bicycle_steering_cmd, -1.0, 1.0))
+        empirical_steering_cmd = float(np.clip(empirical_steering_cmd, -1.0, 1.0))
+        return selected_steering_cmd, bicycle_steering_cmd, empirical_steering_cmd
+
+    def run(self, x, y, yaw_deg, speed_mps):
+        if not (is_valid_number(x) and is_valid_number(y) and is_valid_number(yaw_deg)):
+            self.last_debug = None
+            return 0, 0.0, None
+
+        x_m = float(x)
+        y_m = float(y)
+        yaw_deg = float(yaw_deg)
+        yaw_rad = math.radians(yaw_deg)
+        speed_mps = max(0.0, float(speed_mps)) if is_valid_number(speed_mps) else 0.0
+
+        closest_idx, closest_dist_m = self._find_closest_idx_forward(x_m, y_m)
+        state = self._compute_tracking_state(
+            x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m,
+        )
+        candidate_target_behind_counter = (
+            self.target_behind_counter + 1 if state["target_behind"] else 0
+        )
+        resync_reasons = self._should_force_resync(
+            state, candidate_target_behind_counter
+        )
+        resynced_this_cycle = False
+        if resync_reasons:
+            closest_idx, closest_dist_m = self._full_resync_idx(x_m, y_m)
+            self.closest_idx = int(closest_idx)
+            self.initial_sync_done = True
+            state = self._compute_tracking_state(
+                x_m, y_m, yaw_deg, yaw_rad, speed_mps, closest_idx, closest_dist_m,
+            )
+            self.target_behind_counter = (
+                self.target_behind_counter + 1 if state["target_behind"] else 0
+            )
+            resynced_this_cycle = True
+        else:
+            self.target_behind_counter = candidate_target_behind_counter
+
+        self.rejoin_active = bool(state["rejoin_mode"])
+        closest_idx = state["closest_idx"]
+        closest_dist_m = state["closest_dist_m"]
+        lookahead_m = state["lookahead_m"]
+        target_idx = state["target_idx"]
+        target_x_m = state["target_x_m"]
+        target_y_m = state["target_y_m"]
+        target_heading_deg = state["target_heading_deg"]
+        heading_error_deg = state["heading_error_deg"]
+        curvature = state["curvature"]
+        x_vehicle = state["x_vehicle"]
+        y_vehicle = state["y_vehicle"]
+        target_behind = state["target_behind"]
+        rejoin_mode = state["rejoin_mode"]
+        if target_behind:
+            # turn hard toward whichever side the target is on
+            steer_norm = 0.0 if abs(y_vehicle) < 1e-6 else math.copysign(1.0, y_vehicle)
+            bicycle_steering_cmd = float(np.clip(self.steering_sign * steer_norm, -1.0, 1.0))
+            empirical_steering_cmd = bicycle_steering_cmd
+        else:
+            steer_norm, bicycle_steering_cmd, empirical_steering_cmd = (
+                self._curvature_to_steering_cmd(curvature)
+            )
+            if rejoin_mode:
+                steer_norm = float(np.clip(steer_norm * self.rejoin_steer_gain, -1.0, 1.0))
+                bicycle_steering_cmd = float(
+                    np.clip(bicycle_steering_cmd * self.rejoin_steer_gain, -1.0, 1.0)
+                )
+                empirical_steering_cmd = float(
+                    np.clip(empirical_steering_cmd * self.rejoin_steer_gain, -1.0, 1.0)
+                )
+
+        throttle_erpm = int(self.target_erpm[target_idx])
+        if target_behind:
+            throttle_erpm = min(throttle_erpm, self.behind_target_erpm)
+        if closest_dist_m >= self.off_path_stop_m:
+            throttle_erpm = 0
+        elif closest_dist_m >= self.off_path_slowdown_m:
+            throttle_erpm = min(throttle_erpm, self.off_path_slowdown_erpm)
+
+        throttle_erpm = int(
+            np.clip(
+                throttle_erpm,
+                self.throttle_floor_erpm,
+                self.throttle_ceiling_erpm,
+            )
+        )
+
+        self.last_debug = {
+            "reverse_path": bool(self.reverse_path),
+            "rejoin_mode": bool(rejoin_mode),
+            "rejoin_dist_m": float(self.rejoin_dist_m),
+            "rejoin_exit_dist_m": float(self.rejoin_exit_dist_m),
+            "rejoin_exit_heading_deg": float(self.rejoin_exit_heading_deg),
+            "rejoin_lookahead_m": float(self.rejoin_lookahead_m),
+            "rejoin_steer_gain": float(self.rejoin_steer_gain),
+            "resynced_this_cycle": bool(resynced_this_cycle),
+            "resync_reason": "|".join(resync_reasons),
+            "target_behind_counter": int(self.target_behind_counter),
+            "resync_dist_m": float(self.resync_dist_m),
+            "resync_heading_error_deg": float(self.resync_heading_error_deg),
+            "closest_idx": int(closest_idx),
+            "target_idx": int(target_idx),
+            "closest_dist_m": float(closest_dist_m),
+            "lookahead_m": float(lookahead_m),
+            "yaw_deg": float(yaw_deg),
+            "target_x_m": float(target_x_m),
+            "target_y_m": float(target_y_m),
+            "target_heading_deg": float(target_heading_deg),
+            "heading_error_deg": float(heading_error_deg),
+            "target_kappa": float(self.path_kappa[target_idx]),
+            "pp_curvature": float(curvature),
+            "x_vehicle": float(x_vehicle),
+            "y_vehicle": float(y_vehicle),
+            "speed_mps": float(speed_mps),
+            "target_behind": bool(target_behind),
+            "curvature_to_steering_mode": self.curvature_to_steering,
+            "empirical_kappa_slope": float(self.empirical_kappa_slope),
+            "empirical_steering_offset": float(self.empirical_steering_offset),
+            "bicycle_steering_cmd": float(bicycle_steering_cmd),
+            "empirical_steering_cmd": float(empirical_steering_cmd),
+            "selected_steering_cmd": float(steer_norm),
+            "throttle_erpm": int(throttle_erpm),
+            "steering_norm": float(steer_norm),
+        }
+
+        pp_debug = dict(self.last_debug) if self.verbose else None
+        return throttle_erpm, steer_norm, pp_debug
+
+
+class PurePursuitControllerNode(Node):
+    def __init__(self):
+        super().__init__("pure_pursuit_controller")
+
+        path_csv = declare(
+            self, "path_csv", "", "Waypoint CSV in local XY, optionally with an eRPM column.")
+        wheelbase_m = declare(self, "wheelbase_m", 1.05, "Vehicle wheelbase, in meters.")
+        steer_max_deg = declare(
+            self, "steer_max_deg", 25.0, "Steering angle at full lock, in degrees.")
+        lookahead_time_s = declare(
+            self, "lookahead_time_s", 0.6, "Seconds of travel the lookahead covers.")
+        min_lookahead_m = declare(self, "min_lookahead_m", 4.0, "Lookahead floor, in meters.")
+        max_lookahead_m = declare(self, "max_lookahead_m", 10.0, "Lookahead ceiling, in meters.")
+        search_window = declare(
+            self, "search_window", 80, "Waypoints searched ahead of the last match.")
+        max_resync_dist_m = declare(
+            self, "max_resync_dist_m", 15.0,
+            "Distance from the tracked waypoint that forces a full resync.")
+        resync_dist_m = declare(
+            self, "resync_dist_m", 1.5, "Off-path distance recorded in the debug output.")
+        rejoin_dist_m = declare(
+            self, "rejoin_dist_m", 1.5, "Off-path distance that enters rejoin mode.")
+        rejoin_exit_dist_m = declare(
+            self, "rejoin_exit_dist_m", 0.75, "Distance below which rejoin mode can clear.")
+        rejoin_exit_heading_deg = declare(
+            self, "rejoin_exit_heading_deg", 25.0,
+            "Heading error below which rejoin mode can clear.")
+        rejoin_lookahead_m = declare(
+            self, "rejoin_lookahead_m", 2.5, "Lookahead cap while rejoining.")
+        rejoin_steer_gain = declare(
+            self, "rejoin_steer_gain", 1.25, "Steering multiplier while rejoining.")
+        resync_heading_error_deg = declare(
+            self, "resync_heading_error_deg", 120.0,
+            "Heading error that forces a full resync.")
+        target_behind_resync_cycles = declare(
+            self, "target_behind_resync_cycles", 3,
+            "Consecutive cycles with the target behind before resyncing.")
+        fallback_erpm = declare(
+            self, "fallback_erpm", 1500, "Throttle used when the path has no eRPM column.")
+        throttle_floor_erpm = declare(self, "throttle_floor_erpm", 0, "Throttle floor.")
+        throttle_ceiling_erpm = declare(
+            self, "throttle_ceiling_erpm", 4500, "Throttle ceiling.")
+        behind_target_erpm = declare(
+            self, "behind_target_erpm", 1200, "Throttle cap while the target is behind.")
+        off_path_slowdown_m = declare(
+            self, "off_path_slowdown_m", 1.5, "Off-path distance that caps the throttle.")
+        off_path_stop_m = declare(
+            self, "off_path_stop_m", 3.0, "Off-path distance that stops the kart.")
+        off_path_slowdown_erpm = declare(
+            self, "off_path_slowdown_erpm", 1200, "Throttle cap while off the path.")
+        reverse_path = declare(self, "reverse_path", False, "Drive the path backwards.")
+        curvature_to_steering = declare(
+            self, "curvature_to_steering", "empirical",
+            "Curvature-to-steering model: empirical or bicycle.")
+        empirical_kappa_slope = declare(
+            self, "empirical_kappa_slope", -0.223,
+            "Curvature per unit steering, measured on the kart.")
+        empirical_steering_offset = declare(
+            self, "empirical_steering_offset", 0.097, "Steering command that drives straight.")
+        steering_sign = declare(
+            self, "steering_sign", 1.0, "Flip to -1.0 if the kart steers the wrong way.")
+        self.verbose = declare(
+            self, "verbose", False, "Publish the full debug dictionary as JSON.")
+
+        self.controller = PurePursuitController(
+            path_csv,
+            wheelbase_m=wheelbase_m,
+            steer_max_deg=steer_max_deg,
+            lookahead_time_s=lookahead_time_s,
+            min_lookahead_m=min_lookahead_m,
+            max_lookahead_m=max_lookahead_m,
+            search_window=search_window,
+            max_resync_dist_m=max_resync_dist_m,
+            resync_dist_m=resync_dist_m,
+            rejoin_dist_m=rejoin_dist_m,
+            rejoin_exit_dist_m=rejoin_exit_dist_m,
+            rejoin_exit_heading_deg=rejoin_exit_heading_deg,
+            rejoin_lookahead_m=rejoin_lookahead_m,
+            rejoin_steer_gain=rejoin_steer_gain,
+            resync_heading_error_deg=resync_heading_error_deg,
+            target_behind_resync_cycles=target_behind_resync_cycles,
+            fallback_erpm=fallback_erpm,
+            throttle_floor_erpm=throttle_floor_erpm,
+            throttle_ceiling_erpm=throttle_ceiling_erpm,
+            behind_target_erpm=behind_target_erpm,
+            off_path_slowdown_m=off_path_slowdown_m,
+            off_path_stop_m=off_path_stop_m,
+            off_path_slowdown_erpm=off_path_slowdown_erpm,
+            reverse_path=reverse_path,
+            curvature_to_steering=curvature_to_steering,
+            empirical_kappa_slope=empirical_kappa_slope,
+            empirical_steering_offset=empirical_steering_offset,
+            steering_sign=steering_sign,
+            verbose=self.verbose,
+        )
+        self.get_logger().info(
+            f"Loaded {len(self.controller.path_x_m)} waypoints from {path_csv}")
+
+        self.steer_pub = self.create_publisher(Float64, "cmd/steering", 10)
+        self.throt_pub = self.create_publisher(Float64, "cmd/throttle", 10)
+        self.debug_pub = self.create_publisher(String, "controller/pure_pursuit_debug", 10)
+        self.create_subscription(Odometry, "odometry/filtered", self.on_odometry, 10)
+
+    def on_odometry(self, odom):
+        x_m = odom.pose.pose.position.x
+        y_m = odom.pose.pose.position.y
+        if not (math.isfinite(x_m) and math.isfinite(y_m)):
+            self.get_logger().warn("odometry position is not finite", throttle_duration_sec=5.0)
+            return
+
+        yaw_deg = math.degrees(quaternion_to_yaw(odom.pose.pose.orientation))
+        speed_mps = odom.twist.twist.linear.x
+
+        throttle_erpm, steer_norm, pp_debug = self.controller.run(
+            x_m, y_m, yaw_deg, speed_mps)
+
+        self.steer_pub.publish(Float64(data=float(steer_norm)))
+        self.throt_pub.publish(Float64(data=float(throttle_erpm)))
+
+        if pp_debug is not None:
+            self.debug_pub.publish(String(data=json.dumps(pp_debug)))
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = PurePursuitControllerNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.try_shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,82 @@
+# Parameters for cte.launch.py, mirroring the values in cte_runner.py.
+# The Donkeycar runner drove every part at 50 Hz; here each node has its own
+# rate, so the sensors and the controller can run at rates that suit them.
+
+loop_clock:
+  ros__parameters:
+    rate_hz: 50.0
+
+gstreamer_video_sync:
+  ros__parameters:
+    device: /dev/video0
+    width: 1280
+    height: 720
+    fps: 30
+    source_format: mjpeg
+
+health_check:
+  ros__parameters:
+    # The Donkeycar part always reported healthy; set true to really check.
+    enabled: false
+    host_ip: 192.168.12.25
+    host_port: 6000
+    rate_hz: 50.0
+
+uart_backup:
+  ros__parameters:
+    port_name: /dev/ttyACM1
+    rate_hz: 50.0
+    max_steer_diff: 0.1
+    startup_cycles: 250
+    startup_throttle: 1500.0
+
+gps:
+  ros__parameters:
+    port: /dev/ttyACM0
+    rate_hz: 30.0
+
+bno086:
+  ros__parameters:
+    port: /dev/ttyACM2
+    declination: -4.55
+    rate_hz: 50.0
+
+# The datum both frame conversions are anchored at. cte_runner.py took this
+# from the first row of the waypoint CSV; set it to that same point.
+gps_to_xy:
+  ros__parameters:
+    ref_lat_deg: 40.4237
+    ref_lon_deg: -86.9212
+    min_heading_step: 0.3
+    publish_tf: true
+
+xy_to_gps:
+  ros__parameters:
+    ref_lat_deg: 40.4237
+    ref_lon_deg: -86.9212
+
+heading_fusion:
+  ros__parameters:
+    rate_hz: 50.0
+    min_gps_speed_mps: 1.0
+    max_imu_accuracy_deg: 15.0
+
+# cte_runner.py expects the "<path>_xy_throttle.csv" naming convention.
+cte_controller:
+  ros__parameters:
+    kp: 0.25
+    ki: 0.0
+    kd: 0.1
+    look_ahead: 3
+    look_behind: 1
+    throttle: 2500
+
+threaded_socket_pub:
+  ros__parameters:
+    host: localhost
+    port: 5005
+    rate_hz: 10.0
+
+logger_gps:
+  ros__parameters:
+    rate_hz: 50.0

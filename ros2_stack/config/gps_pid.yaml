@@ -1,0 +1,40 @@
+# Parameters for gps_pid.launch.py, mirroring the values in gps_pid_runner.py.
+
+health_check:
+  ros__parameters:
+    enabled: false
+    host_ip: 192.168.12.25
+    host_port: 6000
+
+uart_backup:
+  ros__parameters:
+    port_name: /dev/ttyACM0
+    rate_hz: 30.0
+
+imu:
+  ros__parameters:
+    port: /dev/ttyACM1
+    baud: 115200
+    rate_hz: 30.0
+
+gps:
+  ros__parameters:
+    port: /dev/ttyACM2
+    rate_hz: 30.0
+
+# The datum. gps_pid_runner.py took this from the first row of the waypoint
+# CSV; set it to that same point.
+gps_to_xy:
+  ros__parameters:
+    ref_lat_deg: 40.4237
+    ref_lon_deg: -86.9212
+
+gps_pid:
+  ros__parameters:
+    lookahead_m: 6.0
+    throttle: 0.22
+    kp: 1.0
+    ki: 0.0
+    kd: 0.15
+    max_steer_deg: 35.0
+    search_window: 20
