@@ -1,0 +1,1 @@
+env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 python test_open3d.py
