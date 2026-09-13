@@ -1,0 +1,138 @@
+# One test per invocation:  python sysid_runner.py plans/day1.yaml steer_step
+# segment: {t: seconds, thr: counts, steer: -1..1} or {t, thr, chirp: {amp, f0, f1}}
+# missing thr/steer = 0. A trailing {t: N} is the coast-out.
+rate_hz: 50
+max_speed_mps: 9            # latched throttle cut; GPS is 4 Hz so this is a backstop, not a brake
+steer_bias: 0.0        # set from steer_offset result before the straight-line tests
+
+tests:
+  steer_offset:        # which steer value drives straight? ~60 m straight
+    - {t: 6, thr: 1500, steer: -0.15}
+    - {t: 6, thr: 1500, steer: -0.10}
+    - {t: 6, thr: 1500, steer: -0.05}
+    - {t: 6, thr: 1500, steer:  0.00}
+    - {t: 6, thr: 1500, steer:  0.05}
+    - {t: 6, thr: 1500, steer:  0.10}
+    - {t: 6, thr: 1500, steer:  0.15}
+    - {t: 10}
+
+  circle_map_slow:     # steer -> curvature map, ~8 m radius
+    - {t: 20, thr: 1500, steer:  0.25}
+    - {t: 20, thr: 1500, steer:  0.50}
+    - {t: 20, thr: 1500, steer:  0.75}
+    - {t: 20, thr: 1500, steer:  1.00}
+    - {t: 20, thr: 1500, steer: -0.25}
+    - {t: 20, thr: 1500, steer: -0.50}
+    - {t: 20, thr: 1500, steer: -0.75}
+    - {t: 20, thr: 1500, steer: -1.00}
+    - {t: 10}
+
+  circle_map_fast:     # same map at speed (understeer)
+    - {t: 20, thr: 3500, steer:  0.25}
+    - {t: 20, thr: 3500, steer:  0.50}
+    - {t: 20, thr: 3500, steer:  0.75}
+    - {t: 20, thr: 3500, steer:  1.00}
+    - {t: 20, thr: 3500, steer: -0.25}
+    - {t: 20, thr: 3500, steer: -0.50}
+    - {t: 20, thr: 3500, steer: -0.75}
+    - {t: 20, thr: 3500, steer: -1.00}
+    - {t: 10}
+
+  circle_limit:        # slip onset: compare imu ay with v^2 * curvature
+    - {t: 15, thr: 4500, steer:  0.50}
+    - {t: 15, thr: 4500, steer:  0.75}
+    - {t: 15, thr: 4500, steer:  1.00}
+    - {t: 15, thr: 4500, steer: -1.00}
+    - {t: 12}
+
+  steer_step:          # yaw-rate time constant, ~20 m box
+    - {t: 5, thr: 2500}
+    - {t: 5, thr: 2500, steer:  0.5}
+    - {t: 5, thr: 2500}
+    - {t: 5, thr: 2500, steer: -0.5}
+    - {t: 5, thr: 2500}
+    - {t: 5, thr: 2500, steer:  0.25}
+    - {t: 5, thr: 2500}
+    - {t: 5, thr: 2500, steer: -0.25}
+    - {t: 5, thr: 2500}
+    - {t: 10}
+
+  steer_step_fast:     # does steering lag change with speed?
+    - {t: 5, thr: 3500}
+    - {t: 5, thr: 3500, steer:  0.4}
+    - {t: 5, thr: 3500}
+    - {t: 5, thr: 3500, steer: -0.4}
+    - {t: 5, thr: 3500}
+    - {t: 4, thr: 5500}
+    - {t: 4, thr: 5500, steer:  0.15}
+    - {t: 4, thr: 5500}
+    - {t: 4, thr: 5500, steer: -0.15}
+    - {t: 4, thr: 5500}
+    - {t: 20}
+
+  steer_chirp:         # steer -> yaw-rate frequency response
+    - {t: 5, thr: 2500}
+    - {t: 40, thr: 2500, chirp: {amp: 0.3, f0: 0.1, f1: 1.5}}
+    - {t: 10}
+
+  throttle_steps:      # accel time constant + coast-down drag, ~60 m straight
+    - {t: 8, thr: 1500}
+    - {t: 10}
+    - {t: 8, thr: 2500}
+    - {t: 10}
+    - {t: 8, thr: 3500}
+    - {t: 12}
+
+  throttle_stairs:     # steady-state throttle -> speed map, long straight
+    - {t: 6, thr: 1000}
+    - {t: 6, thr: 1500}
+    - {t: 6, thr: 2000}
+    - {t: 6, thr: 2500}
+    - {t: 6, thr: 3000}
+    - {t: 6, thr: 3500}
+    - {t: 6, thr: 4000}
+    - {t: 12}
+
+  # --- high speed: run on the 177 m axis of the Kent Ave lot, start at one end,
+  # --- in this order. Each is accelerate then coast; nothing here brakes.
+  speed_5500:
+    - {t: 10, thr: 5500}
+    - {t: 25}
+
+  speed_7000:
+    - {t: 10, thr: 7000}
+    - {t: 30}
+
+  speed_8500:
+    - {t: 10, thr: 8500}
+    - {t: 35}
+
+  # --- held-out validation: never fit to this, replay it through the sim
+  validation_prbs:
+    - {t: 3, thr: 3000, steer: -0.2}
+    - {t: 4, thr: 3000, steer: -0.4}
+    - {t: 1, thr: 3000, steer: -0.4}
+    - {t: 3, thr: 3000, steer: -0.4}
+    - {t: 2, thr: 3000, steer: -0.4}
+    - {t: 1, thr: 3000, steer: +0.4}
+    - {t: 4, thr: 3000, steer: -0.4}
+    - {t: 2, thr: 3000, steer: -0.4}
+    - {t: 4, thr: 3000, steer: -0.4}
+    - {t: 1, thr: 3000, steer: -0.2}
+    - {t: 1, thr: 3000, steer: +0.4}
+    - {t: 1, thr: 3000, steer: -0.2}
+    - {t: 1, thr: 3000, steer: -0.2}
+    - {t: 3, thr: 3000, steer: +0.4}
+    - {t: 2, thr: 3000, steer: -0.4}
+    - {t: 3, thr: 3000, steer: -0.2}
+    - {t: 1, thr: 3000, steer: -0.2}
+    - {t: 3, thr: 3000, steer: -0.4}
+    - {t: 1, thr: 3000, steer: -0.4}
+    - {t: 2, thr: 3000, steer: +0.4}
+    - {t: 4, thr: 3000, steer: +0.2}
+    - {t: 4, thr: 3000, steer: +0.4}
+    - {t: 3, thr: 3000, steer: +0.2}
+    - {t: 2, thr: 3000, steer: -0.2}
+    - {t: 2, thr: 3000, steer: -0.4}
+    - {t: 3, thr: 3000, steer: +0.4}
+    - {t: 10}

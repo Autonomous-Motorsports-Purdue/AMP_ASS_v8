@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import math
+import os
 import re
 import time
 
@@ -92,12 +93,20 @@ class BNO086:
         mount_offset=0.0,
         invert=False,
         poll_delay=0.0025,
-        donkey=True
+        donkey=True,
+        raw_log_path=None,
     ):
         import serial
 
         self.ser = serial.Serial(port, baudrate, timeout=timeout)
         time.sleep(2.0)
+
+        # Optional native-rate log of every sample (the vehicle loop only samples at its rate).
+        self.raw_log = None
+        if raw_log_path:
+            os.makedirs(os.path.dirname(raw_log_path), exist_ok=True)
+            self.raw_log = open(raw_log_path, "w", buffering=1)
+            self.raw_log.write("rx_monotonic_ns,seq,t_ms,heading,ax,ay,az,gx,gy,gz\n")
 
         self.declination = declination
         self.mount_offset = mount_offset
@@ -128,6 +137,8 @@ class BNO086:
         self.running = False
         if self.ser and self.ser.is_open:
             self.ser.close()
+        if self.raw_log:
+            self.raw_log.close()
 
     def _parse_line(self, line):
         fields = dict(KV_RE.findall(line))
@@ -152,45 +163,32 @@ class BNO086:
         roll, pitch, yaw = quat_to_euler_deg(x, y, z, w)
         heading = wrap360(math_yaw_to_compass_heading(yaw) + self.mount_offset + self.declination)
 
-        if not self.donkey:
-            return {
-                "heading": heading,
-                "roll": roll,
-                "pitch": pitch,
-                "yaw": wrap360(yaw),
-                "quat": (x, y, z, w),
-                "accuracy_deg": field_float(fields, "accuracy_deg"),
-                "lin_accel": (
-                    field_float(fields, "lin_ax_mps2", math.nan),
-                    field_float(fields, "lin_ay_mps2", math.nan),
-                    field_float(fields, "lin_az_mps2", math.nan),
-                ),
-                "gyro_dps": (
-                    field_float(fields, "gx_dps", math.nan),
-                    field_float(fields, "gy_dps", math.nan),
-                    field_float(fields, "gz_dps", math.nan),
-                ),
-                "seq": field_int(fields, "seq"),
-                "t_ms": field_int(fields, "t_ms"),
-                "raw": line,
-            }
+        accuracy_deg = field_float(fields, "accuracy_deg")
+        lin_accel = tuple(field_float(fields, k, math.nan) for k in ("lin_ax_mps2", "lin_ay_mps2", "lin_az_mps2"))
+        gyro_dps = tuple(field_float(fields, k, math.nan) for k in ("gx_dps", "gy_dps", "gz_dps"))
+        seq = field_int(fields, "seq")
+        t_ms = field_int(fields, "t_ms")
+        rx_ns = time.monotonic_ns()
 
-        if self.donkey: # NOTE: must return list
-            return [
-                heading, # HEADING
-                field_float(fields, "accuracy_deg"), # ACCURACY
-                ( # LIN_ACCEL
-                    field_float(fields, "lin_ax_mps2", math.nan),
-                    field_float(fields, "lin_ay_mps2", math.nan),
-                    field_float(fields, "lin_az_mps2", math.nan),
-                ),
-                ( # GYRO
-                    field_float(fields, "gx_dps", math.nan),
-                    field_float(fields, "gy_dps", math.nan),
-                    field_float(fields, "gz_dps", math.nan),
-                ), 
-            ]
+        if self.raw_log:
+            self.raw_log.write(",".join(map(str, (rx_ns, seq, t_ms, heading, *lin_accel, *gyro_dps))) + "\n")
 
+        if self.donkey:  # NOTE: must return list
+            return [heading, accuracy_deg, lin_accel, gyro_dps, seq, t_ms, rx_ns]
+
+        return {
+            "heading": heading,
+            "roll": roll,
+            "pitch": pitch,
+            "yaw": wrap360(yaw),
+            "quat": (x, y, z, w),
+            "accuracy_deg": accuracy_deg,
+            "lin_accel": lin_accel,
+            "gyro_dps": gyro_dps,
+            "seq": seq,
+            "t_ms": t_ms,
+            "raw": line,
+        }
 
 
 def main():
