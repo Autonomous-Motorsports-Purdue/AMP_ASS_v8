@@ -7,6 +7,7 @@ Abort with Ctrl-C: the UART driver's shutdown sends throttle 0, steer 0.
 import argparse
 import datetime
 import shutil
+import time
 
 import donkeycar as dk
 import yaml
@@ -41,7 +42,8 @@ if __name__ == "__main__":
     V = dk.vehicle.Vehicle()
     V.add(LoopClock(), outputs=["loop/index", "loop/monotonic_ns", "loop/wall_time"])
     V.add(HealthCheck("192.168.12.25", 6000), outputs=["safety/heartbeat"])
-    V.add(GPS("/dev/ttyACM0"), outputs=["lat", "lon", "alt", "fix", "corr_age", "hdop", "sat_count", "gps_heading", "gps_speed"], threaded=True)
+    gps = GPS("/dev/ttyACM0")
+    V.add(gps, outputs=["lat", "lon", "alt", "fix", "corr_age", "hdop", "sat_count", "gps_heading", "gps_speed"], threaded=True)
     V.add(BNO086(port="/dev/ttyACM2", raw_log_path=out + "_imu.csv"),
           outputs=["imu_heading", "imu_accuracy_deg", "imu_lin_accel", "imu_gyro", "imu_seq", "imu_t_ms", "imu_rx_ns"], threaded=True)
 
@@ -62,5 +64,9 @@ if __name__ == "__main__":
     V.add(logger, inputs=logger.inputs)
     shutil.copy(args.plan, out + ".yaml")
 
-    input(f"{args.test}: {sequencer.duration_s:.0f} s. Confirm RTK fix, then press Enter to arm. ")
+    # GPS streams only start on first run(); block here so the sequence clock starts with a fix.
+    print(f"{args.test}: {sequencer.duration_s:.0f} s. Waiting for RTK fix...")
+    while gps.run()[3] not in ("RTK FLOAT", "RTK FIXED"):
+        time.sleep(0.5)
+    input("RTK fix acquired. Press Enter to arm. ")
     V.start(rate_hz=rate_hz, max_loop_count=int(sequencer.duration_s * rate_hz))
