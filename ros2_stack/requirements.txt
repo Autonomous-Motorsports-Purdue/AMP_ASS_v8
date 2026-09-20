@@ -1,23 +1,13 @@
-# Python dependencies with no apt package for rosdep to resolve.
-# Only the nodes that import them need them installed.
-#
-#   pip install -r requirements.txt
+# Python dependencies for ros2_parts.
+# ROS Humble is Python 3.10. Pins taken from a 3.11 environment (scipy
+#    1.16.x, ipython 9.x and friends) will not install at all.
 
-# gps_node -- GNSS reader and NTRIP client
-pygnssutils
-
-# segment_model_node -- steering PID
-simple-pid
-
-# ekf_localizer_node -- extended Kalman filter
-filterpy
-
-# onnx_node, segment_model_node -- model inference
-onnxruntime-gpu
-
-# zed_frame_publisher_node -- installed with the ZED SDK, not from pip:
-#   https://www.stereolabs.com/docs/app-development/python/install
-# pyzed
-
-# gstreamer_video_sync_node -- GStreamer bindings, install from apt:
-#   sudo apt install python3-gi gstreamer1.0-plugins-{good,bad,ugly} gstreamer1.0-libav
+numpy>=1.21,<1.25
+scipy>=1.8,<2
+matplotlib>=3.5,<4
+pandas>=1.3,<3
+scikit-image>=0.18,<0.23
+pyserial>=3.5,<4
+pygnssutils==1.2.7
+simple-pid==2.0.1
+filterpy==1.4.5

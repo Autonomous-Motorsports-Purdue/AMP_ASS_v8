@@ -1,0 +1,86 @@
+# Two services from one Dockerfile.
+#
+#   docker compose -f docker/docker-compose.yml run --rm laptop   # any machine
+#   docker compose -f docker/docker-compose.yml run --rm amp      # on the kart
+#
+# Inside either:
+#   colcon build --packages-select ros2_parts && . install/setup.bash
+#   ros2 launch ros2_parts cte.launch.py path_csv:=/amp/gps_paths/<file>.csv
+
+services:
+  # Development anywhere: no CUDA, no ZED, no hardware. Fake sensors, CSV
+  # replay, the controllers, rviz2 and the tests.
+  laptop:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        TARGET: laptop
+    image: amp/ros2_parts:humble
+
+    environment:
+      # Everything runs inside this one container, so keeping DDS off the
+      # network avoids discovery trouble on Docker Desktop's NAT.
+      ROS_LOCALHOST_ONLY: "1"
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      # For rviz2 and the visualizers you need an X server on the host:
+      # VcXsrv on Windows, XQuartz on macOS, then set DISPLAY accordingly.
+      DISPLAY: "${DISPLAY:-host.docker.internal:0.0}"
+
+    volumes:
+      - ..:/amp_ws/src/ros2_parts
+      - ../..:/amp
+      - amp_build:/amp_ws/build
+      - amp_install:/amp_ws/install
+      - amp_log:/amp_ws/log
+      # Linux hosts only -- comment back in there, it does not exist on
+      # Windows or macOS.
+      # - /tmp/.X11-unix:/tmp/.X11-unix:rw
+
+    stdin_open: true
+    tty: true
+
+  # The kart: host networking for ROS 2 discovery, the nvidia runtime for CUDA
+  # and the ZED, /dev for the serial adapters.
+  amp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        TARGET: jetson
+    image: amp/ros2_parts:humble-l4t36.4
+
+    runtime: nvidia
+    # Serial adapters get replugged and renamed by udev on the host; privileged
+    # plus all of /dev is what makes that visible in a running container.
+    privileged: true
+    network_mode: host
+    ipc: host
+
+    environment:
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      DISPLAY: "${DISPLAY:-:0}"
+
+    volumes:
+      - ..:/amp_ws/src/ros2_parts      # the package, edited on the host
+      - ../..:/amp                     # paths, logs, ONNX models
+      - amp_build_jetson:/amp_ws/build # colcon output, kept across `run --rm`
+      - amp_install_jetson:/amp_ws/install
+      - amp_log_jetson:/amp_ws/log
+      - zed_resources:/usr/local/zed/resources
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /etc/localtime:/etc/localtime:ro
+
+    stdin_open: true
+    tty: true
+
+volumes:
+  amp_build:
+  amp_install:
+  amp_log:
+  amp_build_jetson:
+  amp_install_jetson:
+  amp_log_jetson:
+  zed_resources:

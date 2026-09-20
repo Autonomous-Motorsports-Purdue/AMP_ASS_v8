@@ -1,0 +1,9 @@
+# Only package.xml and requirements.txt are copied into the image, to resolve
+# dependencies at build time. The ros2_parts source itself is bind-mounted at
+# run time. (ROS 2 Humble is installed in the image from apt, not from here.)
+build/
+install/
+log/
+__pycache__/
+*.pyc
+.pytest_cache/

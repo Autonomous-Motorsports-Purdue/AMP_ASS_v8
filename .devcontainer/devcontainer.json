@@ -1,0 +1,65 @@
+// Opens VS Code inside the ros2_parts container, so Pylance resolves rclpy,
+// sensor_msgs and the rest of ROS -- they live at /opt/ros/humble in the image
+// and do not exist on the host at all.
+//
+//   F1 -> "Dev Containers: Reopen in Container"
+//
+// This reuses the `laptop` service from docker/docker-compose.yml rather than
+// defining a second image, so what you develop in is what the smoke test runs.
+// To work against the Jetson image instead, change "service" to "amp".
+{
+  "name": "ros2_parts (laptop)",
+  "dockerComposeFile": ["../ros2_stack/docker/docker-compose.yml"],
+  "service": "laptop",
+
+  // Must correspond to the host folder you opened in VS Code. You open
+  // AMP_ASS_v8, and compose mounts the repo root at /amp, so this is /amp.
+  // Setting it to /amp_ws instead points VS Code at a folder that is not a
+  // mount of what you opened, which makes the extension try to reconcile the
+  // two. The colcon workspace is still /amp_ws -- cd there to build.
+  "workspaceFolder": "/amp",
+
+  // The compose service's CMD is an interactive bash, which exits immediately
+  // without a TTY attached. Dev Containers substitutes a sleep loop; the
+  // image's ENTRYPOINT still sources ROS around it.
+  "overrideCommand": true,
+  "remoteUser": "amp",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-iot.vscode-ros",
+        "redhat.vscode-xml",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+
+        // Pylance does not inherit the PYTHONPATH that sourcing ROS sets up,
+        // so the two ROS paths are listed explicitly. Verified against
+        // `python3 -c "import sys; print(sys.path)"` in the image -- note the
+        // second is local/lib/.../dist-packages, not site-packages.
+        "python.analysis.extraPaths": [
+          "/opt/ros/humble/lib/python3.10/site-packages",
+          "/opt/ros/humble/local/lib/python3.10/dist-packages",
+          "/amp_ws/install/ros2_parts/lib/python3.10/site-packages",
+          "/amp_ws/src/ros2_parts"
+        ],
+        "python.autoComplete.extraPaths": [
+          "/opt/ros/humble/lib/python3.10/site-packages",
+          "/opt/ros/humble/local/lib/python3.10/dist-packages"
+        ],
+
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "files.associations": { "*.launch.py": "python" },
+        "search.exclude": { "**/build/**": true, "**/install/**": true, "**/log/**": true }
+      }
+    }
+  },
+
+  // --symlink-install so editing a node takes effect without rebuilding.
+  // Run from /amp_ws, which is the colcon workspace, not the opened folder.
+  "postCreateCommand": "cd /amp_ws && colcon build --packages-select ros2_parts --symlink-install"
+}
