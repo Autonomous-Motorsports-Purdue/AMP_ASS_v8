@@ -11,21 +11,23 @@ subscribes to what it needs and publishes real messages. There is no framework
 layer between the node and ROS — what you see in the file is what runs:
 
 ```python
+# in: serial IMU lines | out: imu/data (Imu)
 class ImuNode(Node):
-
-    def __init__(self) -> None:
-        super().__init__('imu')
-        self.port_name = declare(self, 'port', '/dev/ttyACM1', 'Serial port the IMU is on.')
-        self.serial, self.serial_io = self.open_serial()
-        self.publisher = self.create_publisher(Imu, 'imu/data', qos_profile_sensor_data)
-        self.create_timer(1.0 / rate_hz, self.publish_sample)
+    def __init__(self):
+        super().__init__("imu")
+        port = self.declare_parameter("port", "/dev/ttyACM1").value
+        self.ser = serial.Serial(port, 115200, timeout=1)
+        self.pub = self.create_publisher(Imu, "imu/data", qos_profile_sensor_data)
+        self.create_timer(1.0 / rate_hz, self.run)
 ```
 
-Three small modules are shared, because copying them 42 times would be worse:
-[`parameters.py`](ros2_parts/parameters.py) (one helper for described
-parameters), [`orientation.py`](ros2_parts/orientation.py) (quaternion and
-angle conversions) and [`geometry.py`](ros2_parts/geometry.py) (the cross-track
-error). All three are plain functions over the standard API.
+Each file starts with a one-line `# in: ... | out: ...` comment, and the
+callback that does the part's work is called `run`, like the Donkeycar part it
+came from.
+
+Two small modules are shared: [`orientation.py`](ros2_parts/orientation.py)
+(quaternion and angle conversions) and [`geometry.py`](ros2_parts/geometry.py)
+(the cross-track error).
 
 Sensor nodes publish on a timer; everything downstream is event-driven off its
 primary input, except the filters and loggers, which sample the latest of
@@ -44,7 +46,6 @@ Sensors, poses and images use the standard messages, so the graph works with
 | `gps/pose`, `predicted_pose` | `geometry_msgs/PoseStamped` |
 | `odometry/filtered` | `nav_msgs/Odometry` |
 | `camera/*/image_raw`, `perception/*_mask`, `perception/*_image` | `sensor_msgs/Image` |
-| `camera/left/camera_info` | `sensor_msgs/CameraInfo` |
 | `perception/centroid`, `perception/waypoint`, `perception/waypoint_ground` | `geometry_msgs/PointStamped` |
 | `perception/midline` | `nav_msgs/Path` |
 
@@ -97,7 +98,7 @@ Launch files mirror the runners: [`cte.launch.py`](launch/cte.launch.py)
 ## Nodes
 
 `ros2 run ros2_parts <executable>`. Every node takes `rate_hz` where it drives
-a loop, plus whatever `ros2 param describe` lists.
+a loop; other parameters are listed at the top of each node's `__init__`.
 
 | Part | Executable | Subscribes | Publishes |
 | --- | --- | --- | --- |
@@ -105,14 +106,14 @@ a loop, plus whatever `ros2 param describe` lists.
 | `control_mux.py` | `control_mux` | user + auto commands | `cmd/steering`, `cmd/throttle` |
 | `controller.py` | `mpc_part` | `gps/pose` | `cmd/desired_yaw_rate`, `cmd/desired_speed` |
 | `controller.py` | `closed_loop_controller` | desired rate, `imu/data` | `cmd/steering`, `cmd/throttle` |
-| `cte_controller.py` | `cte_controller` | `odometry/filtered`, `gps/pose`, `gps/vel` | commands, `controller/cross_track_error`, `controller/waypoint_index` |
+| `cte_controller.py` | `cte_controller` | `odometry/filtered` | commands, `controller/cross_track_error`, `controller/waypoint_index` |
 | `curve_fit.py` | `curve_fit` | `perception/drivable_mask` | `perception/waypoint`, `perception/curve_image` |
 | `ekf_localizer.py` | `ekf_localizer` | `gps/fix`, `imu/data` | `gps/ekf_fix`, `gps/ekf_vel` |
 | `fake_gps.py` | `fake_gps` | — | `gps/fix`, `gps/fix_type` |
 | `fake_imu.py` | `fake_imu` | — | `imu/data` |
 | `frame_publisher.py` | `frame_publisher` | — | `camera/{left,right}/image_raw` |
-| `gps.py` | `gps` | — | `gps/fix`, `gps/vel`, `gps/fix_type`, quality scalars |
-| `gps_csv.py` | `gps_csv` | — | the same, replayed from a CSV |
+| `gps.py` | `gps` | — | `gps/fix`, `gps/vel`, `gps/fix_type` |
+| `gps_csv.py` | `gps_csv` | — | `gps/fix`, `gps/fix_type`, replayed from a CSV |
 | `gps_pid.py` | `gps_pid` | `gps/pose` | `cmd/steering`, `cmd/throttle` |
 | `gps_to_xy.py` | `gps_to_xy` | `gps/fix` | `gps/pose`, optional `/tf` |
 | `gps_to_xy.py` | `xy_to_gps` | `odometry/filtered` | `gps/fused_fix` |
@@ -134,7 +135,7 @@ a loop, plus whatever `ros2 param describe` lists.
 | `predictive_model.py` | `predictive_model` | `gps/pose`, `gps/vel`, `imu/data` | `predicted_pose` |
 | `preprocessor.py` | `preprocessor` | `camera/image_raw` | `camera/image_preprocessed` |
 | `pure_pursuit.py` | `pure_pursuit` | `perception/waypoint_ground` | `cmd/auto_{steering,throttle}` |
-| `pure_pursuit_controller.py` | `pure_pursuit_controller` | `odometry/filtered` | commands, `controller/pure_pursuit_debug` |
+| `pure_pursuit_controller.py` | `pure_pursuit_controller` | `odometry/filtered` | commands |
 | `segment_model.py` | `segment_model` | `camera/left/image_raw` | segmented image, centroid, commands |
 | `test.py` | `test` | — | `cmd/user_{steering,throttle}` |
 | `threaded_socket_pub_part.py` | `threaded_socket_pub` | fixes, odometry, IMU, steering | — (TCP) |
@@ -142,7 +143,7 @@ a loop, plus whatever `ros2 param describe` lists.
 | `uart.py` | `uart` | commands, heartbeat | — |
 | `uart_backup.py` | `uart_backup` | commands, heartbeat, `gps/fix_type` | `cmd/commanded_*` |
 | `uart_backup2.py` | `uart_backup2` | `cmd/raw_throttle` | — (bench rig) |
-| `zed_frame_publisher.py` | `zed_frame_publisher` | — | ZED images + `camera_info` |
+| `zed_frame_publisher.py` | `zed_frame_publisher` | — | ZED left/right/depth images |
 
 ## Behaviour changes worth knowing
 
@@ -176,6 +177,14 @@ Smaller notes:
   carried over.
 * `logger2` now names its topics by parameter. For anything you intend to keep,
   `ros2 bag record` is the better tool.
+* Dead code in the parts is dropped rather than ported: `cte_controller`'s
+  zero-step prediction (so it no longer needs `gps/pose` or `gps/vel`),
+  `pure_pursuit`'s speed logic that was always overwritten by the constant
+  speed, and `pure_pursuit_controller`'s debug dictionary.
+* `gps` no longer publishes HDOP, satellite count or correction age on their
+  own topics; nothing read them. HDOP still sets the fix covariance.
+* Tuning constants nothing in `config/` overrides are plain module constants
+  at the top of each node rather than ROS parameters.
 * `bno086`'s `wrap360` added 361 degrees to negative angles. Python's modulo
   never produces one, so the branch was dead; it is 360 here.
 

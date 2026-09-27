@@ -43,6 +43,9 @@ services:
   # The kart: host networking for ROS 2 discovery, the nvidia runtime for CUDA
   # and the ZED, /dev for the serial adapters.
   amp:
+    # Only built when named (`run amp`), so a bare `compose build` -- which is
+    # what Dev Containers runs -- doesn't pull the 3.4 GB arm64 Jetson base.
+    profiles: ["jetson"]
     build:
       context: ..
       dockerfile: docker/Dockerfile
