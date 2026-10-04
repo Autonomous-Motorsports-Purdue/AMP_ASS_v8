@@ -14,7 +14,9 @@ ARG TARGET=laptop
 
 FROM ros:humble AS base-laptop
 ENV AMP_TARGET=laptop
-RUN apt update && apt install -y --no-install-recommends ros-humble-desktop \
+RUN apt update && apt install -y --no-install-recommends \
+        ros-humble-desktop ros-humble-rqt ros-humble-rqt-graph \
+        xvfb x11vnc openbox xterm novnc websockify \
     && rosdep update --rosdistro humble
 
 FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0 AS base-jetson
@@ -50,6 +52,8 @@ RUN apt update && rosdep install --from-paths /tmp/deps --ignore-src -r -y --ros
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
+COPY docker/entrypoint.sh /usr/local/bin/amp-entrypoint
+
 RUN apt update && apt install -y --no-install-recommends \
         python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
         gstreamer1.0-tools gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
@@ -84,5 +88,5 @@ RUN printf '%s\n' 'source /opt/ros/humble/setup.bash' \
       '[ -f /amp_ws/install/setup.bash ] && source /amp_ws/install/setup.bash' >> ~/.bashrc
 
 
-ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/humble/setup.bash; [ -f /amp_ws/install/setup.bash ] && source /amp_ws/install/setup.bash; exec \"$0\" \"$@\""]
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/amp-entrypoint"]
 CMD ["bash"]

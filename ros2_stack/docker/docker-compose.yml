@@ -1,8 +1,9 @@
 # Two services from one Dockerfile.
 #
-#   docker compose -f docker/docker-compose.yml run --rm laptop   # any machine
+#   docker compose -f docker/docker-compose.yml up --build laptop # any machine
 #   docker compose -f docker/docker-compose.yml run --rm amp      # on the kart
 #
+# Open http://localhost:6080 for the laptop container's browser desktop.
 # Inside either:
 #   colcon build --packages-select ros2_parts && . install/setup.bash
 #   ros2 launch ros2_parts cte.launch.py path_csv:=/amp/gps_paths/<file>.csv
@@ -23,9 +24,10 @@ services:
       # network avoids discovery trouble on Docker Desktop's NAT.
       ROS_LOCALHOST_ONLY: "1"
       ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
-      # For rviz2 and the visualizers you need an X server on the host:
-      # VcXsrv on Windows, XQuartz on macOS, then set DISPLAY accordingly.
-      DISPLAY: "${DISPLAY:-host.docker.internal:0.0}"
+      DISPLAY: ":1"
+
+    ports:
+      - "127.0.0.1:${NOVNC_PORT:-6080}:6080"
 
     volumes:
       - ..:/amp_ws/src/ros2_parts
@@ -33,9 +35,6 @@ services:
       - amp_build:/amp_ws/build
       - amp_install:/amp_ws/install
       - amp_log:/amp_ws/log
-      # Linux hosts only -- comment back in there, it does not exist on
-      # Windows or macOS.
-      # - /tmp/.X11-unix:/tmp/.X11-unix:rw
 
     stdin_open: true
     tty: true

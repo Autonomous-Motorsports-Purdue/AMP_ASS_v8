@@ -30,8 +30,16 @@ the chosen target needs, so a laptop build never pulls the L4T image.
 From `ros2_stack/`, on any machine:
 
 ```bash
-docker compose -f docker/docker-compose.yml run --rm laptop
+docker compose -f docker/docker-compose.yml up --build laptop
 ```
+
+Open <http://localhost:6080> to use the laptop container's desktop. An xterm
+terminal opens automatically; run `rqt_graph` there to view active ROS nodes.
+The GUI does not start application launch files automatically; start your
+normal ROS nodes or launch file inside the container for them to appear.
+The VNC server is only reachable inside the container, and noVNC is published
+on the host loopback address without a password. Do not change the port binding
+to a public interface.
 
 On the kart:
 
@@ -122,19 +130,33 @@ CPU `onnxruntime` and the Jetson gets NVIDIA's build from
 `pypi.jetson-ai-lab.io`, with an assert that `CUDAExecutionProvider` is present
 so a wrong wheel is a failed build rather than a slow kart.
 
-## GUI
+## GUI and noVNC (laptop)
 
-`rviz2`, `gps_visualizer` and `imu_visualizer` need an X server.
+The laptop image runs Xvfb, Openbox, VNC and noVNC inside the container.
+`rqt` and `rqt_graph` are installed, and the display is set to `:1` for both
+the desktop terminal and container processes. No host X server or host-side
+X11 forwarding is needed.
 
-- **Linux / the Jetson**: `xhost +local:docker`, and the X11 socket mount is
-  already in the `amp` service.
-- **Windows**: run VcXsrv with access control disabled, then
-  `DISPLAY=host.docker.internal:0.0` (the compose default).
-- **macOS**: XQuartz, enable "Allow connections from network clients", then
-  `xhost +127.0.0.1` and `DISPLAY=host.docker.internal:0`.
+Start with `docker compose -f docker/docker-compose.yml up --build laptop`,
+open <http://localhost:6080>, then run `rqt_graph` in the desktop terminal.
+The host port is bound to `127.0.0.1`; VNC port 5901 is not published to the
+host. The local noVNC connection has no password by default, so keep the
+loopback-only port binding. This setup does not configure VNC password
+authentication or a `VNC_PASSWORD` option.
 
-On a Linux host, uncomment the `/tmp/.X11-unix` mount in the `laptop` service;
-that path does not exist on Windows or macOS.
+If port 6080 is already in use, choose another host port while keeping the
+container port unchanged:
+
+```bash
+NOVNC_PORT=6081 docker compose -f docker/docker-compose.yml up --build laptop
+```
+
+In PowerShell, use `$env:NOVNC_PORT="6081"` before running the same Compose
+command. Then open <http://localhost:6081>.
+
+The Jetson `amp` service is unchanged and still requires a host X server for
+GUI applications: Linux hosts can use its existing X11 socket mount. Windows
+and macOS X11 forwarding is not configured for that hardware-focused service.
 
 ## Hardware access (jetson only)
 
