@@ -7,9 +7,9 @@ import numpy as np
 import cv2
 
 # --- Testing ---
-IS_LIVE = False                     # Set to False to read PCAP data from the file below
+IS_LIVE = True                     # Set to False to read PCAP data from the file below
 TEST_DATA_FILE = 'lidar_data.pcapng'   # Path to a PCAP file
-
+SHOW_COMPARISON = True
 # --- Config ---
 GRID_RES = 0.1                      # Meters per cell
 GRID_RANGE = 6                     # Range of grid in meters (Total ~140m square grid for our VLP 16)
@@ -133,12 +133,60 @@ def render_occupancy_grid(grid, obstacles, display_size=(800, 800)):
     return resized
 
 ## AI Stuff
+
+TITLE_BAR_H = 34
+ 
+ 
+def _with_title(img, text):
+    """Stack a labeled dark title bar on top of an image."""
+    titled = np.zeros((img.shape[0] + TITLE_BAR_H, img.shape[1], 3), dtype=np.uint8)
+    titled[TITLE_BAR_H:, :, :] = img
+    cv2.putText(titled, text, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+    return titled
+ 
+ 
+def render_comparison_view(grid, obstacles, display_size=(800, 800)):
+    """
+    Side-by-side view: the raw occupancy grid on the left (exactly what the
+    LiDAR is returning, no interpretation) and the same grid with the
+    detected-obstacle bounding boxes on the right. Useful for sanity-checking
+    whether detect_obstacles() is grouping/splitting blobs the way you'd
+    expect by eye.
+    """
+    raw = render_occupancy_grid(grid, [], display_size)
+    annotated = render_occupancy_grid(grid, obstacles, display_size)
+ 
+    raw_titled = _with_title(raw, "Raw LiDAR occupancy")
+    annotated_titled = _with_title(annotated, f"Detected obstacles ({len(obstacles)})")
+ 
+    return cv2.hconcat([raw_titled, annotated_titled])
+MAX_WINDOW_WIDTH = 1280
+WINDOW_NAME = "Occupancy Grid (with Scale)"
+
 class OutputSink:
     """Handles the optional GUI window and/or video file output."""
  
     def __init__(self, display, save_video, video_path, fps, frame_size):
         self.display = display
         self.writer = None
+
+        if display:
+            try:
+                # WINDOW_NORMAL (resizable) lets OpenCV scale the whole frame to fit the
+                # window uniformly, instead of WINDOW_AUTOSIZE which shows it at full
+                # native pixel size — that's what was pushing the right-hand panel of a
+                # wide side-by-side comparison frame off the edge of the screen.
+                cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+                w, h = frame_size
+                if w > MAX_WINDOW_WIDTH:
+                    scale = MAX_WINDOW_WIDTH / w
+                    w, h = int(w * scale), int(h * scale)
+                cv2.resizeWindow(WINDOW_NAME, w, h)
+            except cv2.error as e:
+                print(f"DISPLAY=True but no GUI backend is available ({e}); "
+                      f"install non-headless opencv-python to use a live window.")
+                self.display = False
+
         if save_video:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             self.writer = cv2.VideoWriter(video_path, fourcc, fps, frame_size)
@@ -188,7 +236,10 @@ def read_live_data():
 
             occ_grid = create_occupancy_grid(points, GRID_RES, GRID_RANGE)
             obstacles = detect_obstacles(occ_grid)
-            frame = render_occupancy_grid(occ_grid, obstacles)
+            if SHOW_COMPARISON:
+                frame = render_comparison_view(occ_grid, obstacles)
+            else:
+                frame = render_occupancy_grid(occ_grid, obstacles)
             sink.write(frame)
     finally:
         sink.close()
@@ -238,7 +289,10 @@ def read_from_file(file_path):
                 obstacles = detect_obstacles(occ_grid)
                 obstacle_counts.append(len(obstacles))
 
-                frame = render_occupancy_grid(occ_grid, obstacles)
+                if SHOW_COMPARISON:
+                    frame = render_comparison_view(occ_grid, obstacles)
+                else:
+                    frame = render_occupancy_grid(occ_grid, obstacles)
                 sink.write(frame)
 
                 if SAVE_SAMPLE_FRAME and scan_index == SAMPLE_FRAME_INDEX:
