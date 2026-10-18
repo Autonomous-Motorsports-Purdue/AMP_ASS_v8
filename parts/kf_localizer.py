@@ -179,17 +179,36 @@ class EK_Localizer:
             self.x = self.update_state_with_measurement(self.x, kalman_gain, drive_encoder_vel, self.H_enc)
             self.est_error_cov = self.update_error_after_measurement(kalman_gain, self.H_enc, self.est_error_cov)
 
+    # get x, y of the kart in meters relative to first waypoint
     def get_position(self):
         return self.x[0], self.x[1]
 
-    def get_pose(self):
-        return self.x[0], self.x[1], self.x[2]
+    # get heading in radians of the kart according to unit circle convention
+    # 0 rad is east, increasing counter clockwise
+    def get_heading_rad(self):
+        return self.x[2]
 
+    # get heading in degrees of kart according to compass direction
+    # 0 deg is north, increasing clockwise
+    def get_compass_heading_deg(self):
+        rad_from_north = wrap(self.get_heading_rad() - 0.5 * math.pi) # [-pi, pi]
+        deg_from_north = math.degrees(rad_from_north) # [-180, 180]
+        deg_from_north_clockwise = -deg_from_north # [-180, 180]
+        return deg_from_north_clockwise
+
+   # get the velocity in meters/sec of kart that is in direction of kart heading
     def get_tangential_vel(self):
         return self.x[3]
 
-    def get_angular_vel(self):
+    # get the angular velocity in rad/sec of kart with positive being counter clockwise rotation
+    def get_angular_vel_rad(self):
         return self.last_gyro_heading_vel - self.x[4]
+
+    # get the angular velocity in deg/sec of kart with positive being clockwise
+    def get_angular_vel_deg(self):
+        rad = self.get_angular_vel_rad()
+        return -math.degrees(rad)
+
 
 
 
