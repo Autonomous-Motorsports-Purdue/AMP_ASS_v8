@@ -19,6 +19,10 @@ class EK_Localizer:
         gyro_bias (rad/sec representing the estimated bias of the gyro)
 
     angular velocity of kart is not in state vector, it is just stored separately as instance data
+
+    the 2 GPSs on the kart
+    ZED-F9P
+    GEM1305
     """
     def __init__(self, start_x, start_y, start_heading, dist_between_gps):
         self.dist_between_gps = dist_between_gps
