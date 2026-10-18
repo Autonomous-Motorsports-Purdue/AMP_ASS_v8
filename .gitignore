@@ -5,3 +5,4 @@ data/
 *.whl
 images/
 *.png
+.vscode/settings.json
