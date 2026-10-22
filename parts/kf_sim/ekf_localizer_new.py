@@ -73,16 +73,13 @@ class EKF_Localizer:
         
         # TODO: need to find drive encoder velocity covariance with data
         self.R_enc = np.zeros((1, 1))
-        self.R_enc[0,0] = 0.01  # this is just placeholder value so it doesn't throw error
 
         # TODO: find Q matrix
         # Q matrix representing covariance of model
-        #self.Q = np.zeros((NUM_STATES, NUM_STATES))
-        self.Q = np.diag([0.01, 0.01, 0.01, 0.01, 0.01])
+        self.Q = np.zeros((NUM_STATES, NUM_STATES))
 
         # matrix reprsenting covariance of error between current estimated state and true state
-        #self.est_error_cov = np.zeros((NUM_STATES, NUM_STATES))
-        self.est_error_cov = np.diag([0.1**2, 0.1**2, math.radians(5)**2, 0.05, math.radians(0.5)**2])
+        self.est_error_cov = np.zeros((NUM_STATES, NUM_STATES))
 
         self.prev_update_time = None
         self.last_gyro_heading_vel = 0.0
