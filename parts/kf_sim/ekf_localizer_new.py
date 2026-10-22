@@ -75,14 +75,26 @@ class EKF_Localizer:
         self.R_enc = np.zeros((1, 1))
 
         # TODO: find Q matrix
-        # Q matrix representing covariance of model
-        self.Q = np.zeros((NUM_STATES, NUM_STATES))
+        self.gyro_stdev = 2.44e-4
+        self.accel_stdev = 1.47e-3
+        # represents the stddev of the amount the bias increases per sec
+        self.bias_walk_rate_stdev = 3.4e-5 # shaky
 
         # matrix reprsenting covariance of error between current estimated state and true state
         self.est_error_cov = np.zeros((NUM_STATES, NUM_STATES))
 
         self.prev_update_time = None
         self.last_gyro_heading_vel = 0.0
+
+    # Q changes based on dt from last frame so need to rebuild every frame
+    # returns nxn matrix
+    def make_Q(self, dt):
+        Q = np.zeros((NUM_STATES, NUM_STATES))
+        Q[0,0] = Q[1,1] = 1e-9 # numerical padding
+        Q[2,2] = (self.gyro_stdev ** 2) * dt
+        Q[3,3] = (self.accel_stdev ** 2) * dt
+        Q[4,4] = (self.bias_walk_rate_stdev ** 2) * dt
+        return Q
 
     # the covariance of the gps angle measurement can be directly derived from
     # the coviarance of the gps position
@@ -145,6 +157,7 @@ class EKF_Localizer:
     # f(x, u) is the function specifying the euler integration used in predict_next_state
     # this needs to be recalculated every loop because F is a linearization of partial derivative of f(x, u)
     # because f(x, u) is a nonlinear function (as seen below with the cos and sin)
+    # F is nxn matrix
     def build_F(self, heading: float, velocity: float, dt: float):
         F = np.eye(NUM_STATES)
         cos_h = math.cos(heading)
@@ -163,7 +176,8 @@ class EKF_Localizer:
         assert x.shape == (NUM_STATES,)
         pos_x, pos_y, heading, velocity, bias_gyro = x
         F = self.build_F(heading, velocity, dt)
-        return F @ self.est_error_cov @ F.T + self.Q
+        Q = self.make_Q(dt)
+        return F @ self.est_error_cov @ F.T + Q
 
     # calculates the kalman gain matrix of a specific measurement given:
     # the estimated state error covariance matrix (nxn matrix)
