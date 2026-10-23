@@ -5,13 +5,39 @@ import numpy as np
 DEFAULT_HZ = 50
 NUM_STATES = 5
 # TODO: find these offsets
-# NOTE: these are the position of each GPS in the KART BODY FRAME
+# these are the position of each GPS in the KART BODY FRAME
 # (x forward along the kart heading, y to the left), relative to the
-# point the state vector tracks. If the state tracks the midpoint of the
-# two GPSs and the baseline runs along the kart's forward axis, these are
-# just (-dist_between_gps/2, 0) and (+dist_between_gps/2, 0).
+# point the state vector tracks
 ZED_GPS_OFFSET_M = (0.1, 0.25) # offset of the ZED gps from where position is measured from
 GEM_GPS_OFFSET_M = (0.1, -0.25) # offset of the GEM gps from where position is measured from
+
+# got these from the spec sheet of the BNO080_085 datasheet
+ACCEL_STDEV = 1.47e-3
+GYRO_STDEV = 2.44e-4
+# CEP of ZED_F9P = 0.01 m, standard dev of ZED_F9P = 0.00849 m
+ZED_GPS_STDEV = 0.00849
+# CEP of GEM1305 = 0.02 m, standard dev of GEM1305 = 0.01698
+GEM_GPS_STDEV = 0.01698
+
+INIT_POSITION_STDEV = GEM_GPS_STDEV ** 2 + ZED_GPS_STDEV ** 2 # temporarily derived from sum of variances from GPS - will prob need to tune as needed
+INIT_HEADING_STDEV = math.radians(5)  # random guess, will prob have to tune as needed
+INIT_FWD_VEL_STDEV = 0.01 # very low cus kart should start stationary
+INIT_GYRO_BIAS_STDEV = math.radians(3) # will prob have to tune as needed
+
+# TODO: need to find
+DRIVE_ENC_STDEV = 0.05
+
+# represents the stddev of the amount the bias increases per sec
+# TODO: need to find allan variance of this with varying time intervals (need prob at least 6 hours of data according to claude)
+# using the points in the allan graph with slop roughly 1/2, find regression line (x and y of line are still log(t) and log(sigma))
+# evaluate the line at t=3
+# equation sigma(t)=K*sqrt(t/3) gives K=sigma(t) at t=3
+# K is bias_walk_rate_stdev
+# ADDITIONAL TODO: should verify gyro_stdev using -1/2 section of graph: (only need like 30min-1hr of data)
+# make linear regression using points with slope of roughly -1/2
+# evaluate it at t=1 (the y intercept) - this is the stdev
+BIAS_WALK_RATE_STDEV = 3.4e-5 # shaky
+
 
 def wrap(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
@@ -52,41 +78,28 @@ class EKF_Localizer:
         # and its linearization H_gps changes based on heading
 
         # R matricies representing covariance of each sensor measurement
-        # CEP of ZED_F9P = 0.01 m, standard dev of ZED_F9P = 0.00849 m
         self.R_gps_zed = np.array([
-            [0.00849 ** 2, 0],
-            [0, 0.00849 ** 2]
+            [ZED_GPS_STDEV ** 2, 0],
+            [0, ZED_GPS_STDEV ** 2]
         ])
-        # CEP of GEM1305 = 0.02 m, standard dev of GEM1305 = 0.01698
         self.R_gps_gem = np.array([
-            [0.01698 ** 2, 0],
-            [0, 0.01698 ** 2]
+            [GEM_GPS_STDEV ** 2, 0],
+            [0, GEM_GPS_STDEV ** 2]
         ])
 
         
         # TODO: need to find drive encoder velocity covariance with data
-        self.R_enc = np.zeros((1, 1))
-        self.R_enc[0,0] = 0.01
+        self.R_enc = np.asarray([[DRIVE_ENC_STDEV ** 2]])
 
-        self.gyro_stdev = 2.44e-4
-        self.accel_stdev = 1.47e-3
-        # represents the stddev of the amount the bias increases per sec
-        self.bias_walk_rate_stdev = 3.4e-5 # shaky
-
-        # matrix reprsenting covariance of error between current estimated state and true state
+        # matrix representing covariance of error between current estimated state and true state
         # these are 1-sigma guesses at how wrong the starting state is: how far
         # off (start_x, start_y, start_heading) are, plus the fact that forward
-        # velocity and gyro bias both just start at 0.
-        # NOTE: zeros here means "the initial guess is exact". that locks every
-        # kalman gain to 0, and with Q[0,0] at 1e-9 the position variance then
-        # recovers at 5e-8 per second, so the filter can never pull in off a bad
-        # start. it has to begin with honest uncertainty.
         self.est_error_cov = np.diag([
-            0.5 ** 2,                   # start_x, m
-            0.5 ** 2,                   # start_y, m
-            math.radians(5) ** 2,       # start_heading
-            0.5 ** 2,                   # forward velocity, m/s
-            math.radians(0.5) ** 2,     # gyro bias, rad/s
+            INIT_POSITION_STDEV ** 2,
+            INIT_POSITION_STDEV ** 2,
+            INIT_HEADING_STDEV ** 2, # dont want to actually do math for this, will prob need to tune as needed
+            INIT_FWD_VEL_STDEV ** 2, # very confident cus it should be 0 (kart starts stationary)
+            INIT_GYRO_BIAS_STDEV ** 2, # idk
         ])
 
         self.prev_update_time = None
@@ -97,9 +110,9 @@ class EKF_Localizer:
     def make_Q(self, dt):
         Q = np.zeros((NUM_STATES, NUM_STATES))
         Q[0,0] = Q[1,1] = 1e-9 # numerical padding
-        Q[2,2] = (self.gyro_stdev ** 2) * dt
-        Q[3,3] = (self.accel_stdev ** 2) * dt
-        Q[4,4] = (self.bias_walk_rate_stdev ** 2) * dt
+        Q[2,2] = (GYRO_STDEV ** 2) * dt
+        Q[3,3] = (ACCEL_STDEV ** 2) * dt
+        Q[4,4] = (BIAS_WALK_RATE_STDEV ** 2) * dt
         return Q
    
     # h(x) = [pos_x, pos_y] + R(heading) @ offset_body
@@ -254,10 +267,6 @@ class EKF_Localizer:
         if gps_gem_position is not None:
             gps_info.append((gps_gem_position, self.R_gps_gem, GEM_GPS_OFFSET_M))
         for gps_pos, gps_R, gps_offset in gps_info:
-            # CLAUDE CHANGED THIS
-            # build h(x) and H for THIS antenna, then fuse the raw GPS reading.
-            # no pre-rotation of the measurement, so the measurement is no longer
-            # a function of the state estimate.
             predicted_gps_pos, H_gps = self.make_h_and_H_gps(gps_offset)
             kalman_gain = self.calculate_kalman_gain(self.est_error_cov, H_gps, gps_R)
             self.x = self.update_state_with_measurement(
