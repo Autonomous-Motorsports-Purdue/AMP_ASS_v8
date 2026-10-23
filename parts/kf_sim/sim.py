@@ -6,7 +6,7 @@ Nothing in here imports anything test-specific; test_ekf.py drives it.
 Assumes ekf_localizer_new.py exposes:
     ekf_localizer_new(start_x, start_y, start_heading, dist_between_gps)
     .update(imu_accel, gyro_heading_vel, gps_zed_position,
-            gps_gem_position, gps_heading, drive_encoder_vel, cur_time=None)
+            gps_gem_position, drive_encoder_vel, cur_time=None)
     .x                 (5,)  [px, py, heading, fwd_vel, gyro_bias]
     .est_error_cov     (5,5)
     module constants ZED_GPS_OFFSET_M, GEM_GPS_OFFSET_M
@@ -35,8 +35,12 @@ class SimConfig:
     imu_hz: float = 50.0
     zed_hz: float = 10.0
     gem_hz: float = 5.0
-    heading_hz: float = 5.0
     enc_hz: float = 20.0
+    # NOTE: the filter no longer takes a heading measurement - a heading derived
+    # from the two antennas is a function of the same two position fixes that
+    # get fused directly, so feeding both counted that noise twice. Sensors
+    # .gps_heading is kept below for the moving-baseline case, see its comment.
+    heading_hz: float = 5.0
 
     # phase offsets, so the two GPS streams are never synchronised.
     # this is the async situation on the real kart.
@@ -46,12 +50,15 @@ class SimConfig:
     # geometry
     dist_between_gps: float = 1.0
 
-    # sensor noise (1 sigma)
-    sigma_accel: float = 0.05        # m/s^2
-    sigma_gyro: float = 0.002        # rad/s
-    sigma_zed: float = 0.00849       # m, per axis
-    sigma_gem: float = 0.01698       # m, per axis
-    sigma_enc: float = 0.10          # m/s
+    # sensor noise (1 sigma), PER SAMPLE - this is what gets added to a reading.
+    # accel and gyro default to None and are derived in __post_init__ from the
+    # filter's own spec numbers, so the sim and make_Q always describe the same
+    # sensor. override with a float to deliberately mismatch them.
+    sigma_accel: float = None        # m/s^2
+    sigma_gyro: float = None         # rad/s
+    sigma_zed: float = 0.00849       # m, per axis, matches R_gps_zed
+    sigma_gem: float = 0.01698       # m, per axis, matches R_gps_gem
+    sigma_enc: float = 0.10          # m/s, matches R_enc = 0.01
 
     # the thing the filter is supposed to discover
     true_gyro_bias: float = 0.01     # rad/s
@@ -68,11 +75,32 @@ class SimConfig:
 
     seed: int = 0
 
+    def __post_init__(self):
+        accel_density, gyro_density = _filter_noise_densities()
+        if self.sigma_accel is None:
+            self.sigma_accel = accel_density * math.sqrt(self.imu_hz)
+        if self.sigma_gyro is None:
+            self.sigma_gyro = gyro_density * math.sqrt(self.imu_hz)
+
     def lever_arms(self):
         """body-frame offsets if the state tracks the midpoint of the two GPSs,
         baseline along the kart's forward axis."""
         d = self.dist_between_gps
         return (-d / 2.0, 0.0), (d / 2.0, 0.0)
+
+
+def _filter_noise_densities():
+    """the filter's accel/gyro noise numbers, as spec-sheet DENSITIES.
+
+    make_Q uses sigma^2 * dt, which is the right form for a density in
+    units/sqrt(Hz). The sim adds noise PER SAMPLE, so the two differ by
+    sqrt(imu_hz) - a factor of ~7 at 50 Hz. Getting that backwards does not
+    look like a unit error from the outside: it reads as a containment failure
+    on fwd_vel and nothing else, so derive the sim's sigmas from the filter's
+    numbers rather than writing them down twice.
+    """
+    probe = EKF_Localizer(0.0, 0.0, 0.0, 1.0)
+    return probe.accel_stdev, probe.gyro_stdev
 
 
 def apply_lever_arms_to_module(cfg):
@@ -217,8 +245,17 @@ class Sensors:
 
     def gps_heading(self, t):
         """heading from the two antenna positions, time-synced (both sampled at
-        the same instant). matches the assumption that sync is handled
-        upstream."""
+        the same instant).
+
+        NOTE: nothing consumes this any more - the filter gets heading
+        observability from the lever-arm column of H_gps instead, and fusing
+        both would double count the receivers' noise. Kept because a real
+        moving-baseline RTK heading is NOT this quantity: it comes from
+        carrier-phase double differencing, which cancels common-mode error and
+        is considerably better than differencing two independently-solved
+        positions. If you ever fuse that, it is genuinely new information - but
+        then fuse heading plus ONE position, never heading plus both.
+        """
         if self._down("heading", t):
             return None
         z = self.truth.antenna_at(t, self.zed_lever) + self.rng.normal(0, self.cfg.sigma_zed, 2)
@@ -286,8 +323,7 @@ def run(cfg, control, noise_free=False, perturb_init=True, ekf=None):
     n = int(cfg.duration * cfg.imu_hz)
 
     log = {k: [] for k in
-           ("t", "truth", "est", "P_diag", "P_full",
-            "nis_gps", "nis_heading", "nis_enc")}
+           ("t", "truth", "est", "P_diag", "P_full", "nis_gps", "nis_enc")}
 
     def due(t, hz, phase):
         """did a tick of this sensor fall inside the last IMU interval"""
@@ -304,15 +340,14 @@ def run(cfg, control, noise_free=False, perturb_init=True, ekf=None):
         gyro = sensors.gyro(t)
         zed = sensors.gps(t, "zed") if due(t, cfg.zed_hz, cfg.zed_phase) else None
         gem = sensors.gps(t, "gem") if due(t, cfg.gem_hz, cfg.gem_phase) else None
-        hdg = sensors.gps_heading(t) if due(t, cfg.heading_hz, 0.0) else None
         enc = sensors.encoder(t) if due(t, cfg.enc_hz, 0.0) else None
 
-        nis = _nis_for_step(ekf, accel, gyro, t, time_kw, zed, gem, hdg, enc)
+        nis = _nis_for_step(ekf, accel, gyro, t, time_kw, zed, gem, enc)
 
         if time_kw is not None:
-            ekf.update(accel, gyro, zed, gem, hdg, enc, **{time_kw: t})
+            ekf.update(accel, gyro, zed, gem, enc, **{time_kw: t})
         else:
-            ekf.update(accel, gyro, zed, gem, hdg, enc)
+            ekf.update(accel, gyro, zed, gem, enc)
 
         tx, ty, th, tv = truth.at(t)
         log["t"].append(t)
@@ -333,7 +368,7 @@ def run(cfg, control, noise_free=False, perturb_init=True, ekf=None):
     return out
 
 
-def _nis_for_step(ekf, accel, gyro, t, time_kw, zed, gem, hdg, enc):
+def _nis_for_step(ekf, accel, gyro, t, time_kw, zed, gem, enc):
     """NIS for whatever measurements arrived this step, scored against the prior.
 
     "The prior" means after THIS step's prediction and before any measurement
@@ -345,28 +380,27 @@ def _nis_for_step(ekf, accel, gyro, t, time_kw, zed, gem, hdg, enc):
 
     The filter has no separate predict() - prediction and fusion both live
     inside update(). So run update() on a throwaway copy with the IMU inputs
-    and no measurements: that path propagates x and P, refreshes R_heading, and
-    touches nothing else. Copying the filter rather than reimplementing euler
+    and no measurements: that path propagates x and P and touches nothing else. Copying the filter rather than reimplementing euler
     and F P F.T here means this cannot drift out of sync with it.
     """
-    if all(z is None for z in (zed, gem, hdg, enc)):
-        return {"nis_gps": None, "nis_heading": None, "nis_enc": None}
+    if all(z is None for z in (zed, gem, enc)):
+        return {"nis_gps": None, "nis_enc": None}
 
     prior = copy.deepcopy(ekf)
     if time_kw is not None:
-        prior.update(accel, gyro, None, None, None, None, **{time_kw: t})
+        prior.update(accel, gyro, None, None, None, **{time_kw: t})
     else:
-        prior.update(accel, gyro, None, None, None, None)
-    return _nis_terms(prior, zed, gem, hdg, enc)
+        prior.update(accel, gyro, None, None, None)
+    return _nis_terms(prior, zed, gem, enc)
 
 
-def _nis_terms(ekf, zed, gem, hdg, enc):
+def _nis_terms(ekf, zed, gem, enc):
     """normalised innovation squared, per channel. `ekf` must already be at the
     prior - see _nis_for_step, which is what callers want.
 
     NIS needs no ground truth, so the same function works on real kart data.
     """
-    res: dict[str, float | None] = {"nis_gps": None, "nis_heading": None, "nis_enc": None}
+    res: dict[str, float | None] = {"nis_gps": None, "nis_enc": None}
 
     def nis(innov, H, R):
         S = H @ ekf.est_error_cov @ H.T + R
@@ -381,10 +415,6 @@ def _nis_terms(ekf, zed, gem, hdg, enc):
         gps_vals.append(nis(np.asarray(z, float) - pred, H, R))
     if gps_vals:
         res["nis_gps"] = float(np.mean(gps_vals))
-
-    if hdg is not None:
-        innov = np.array([wrap(hdg - ekf.x[2])])
-        res["nis_heading"] = nis(innov, ekf.H_ang, ekf.R_heading)
 
     if enc is not None:
         innov = np.array([enc - ekf.x[3]])

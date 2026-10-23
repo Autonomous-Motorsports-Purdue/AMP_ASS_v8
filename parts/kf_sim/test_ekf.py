@@ -61,7 +61,7 @@ def check_jacobians(eps=1e-6, tol=1e-5):
         gyro = rng.uniform(-1, 1)
 
         # --- F ---
-        F = ekf.build_F(x[2], x[3], dt)
+        F = ekf.build_F(x, dt, accel, gyro)
         f0 = ekf.predict_next_state(x, dt, accel, gyro)
         for j in range(NUM_STATES):
             xp = x.copy()
@@ -207,7 +207,7 @@ def check_nis(tol=0.6):
     cfg = SimConfig(duration=60.0)
     r = run(cfg, ctrl_figure_eight)
 
-    for key, dim in (("nis_gps", 2), ("nis_heading", 1), ("nis_enc", 1)):
+    for key, dim in (("nis_gps", 2), ("nis_enc", 1)):
         arr = r[key]
         if len(arr) == 0:
             report(f"{key} average near {dim}", False, "no samples")
@@ -264,8 +264,7 @@ def check_gps_dropout():
     """kill both receivers for 10 s. P should grow while dead reckoning and the
     estimate should snap back on reacquisition without overshooting."""
     cfg = SimConfig(duration=60.0,
-                    dropouts=[("zed", 20.0, 30.0), ("gem", 20.0, 30.0),
-                              ("heading", 20.0, 30.0)])
+                    dropouts=[("zed", 20.0, 30.0), ("gem", 20.0, 30.0)])
     r = run(cfg, ctrl_straight)
     t = r["t"]
     pvar = r["P_diag"][:, 0]

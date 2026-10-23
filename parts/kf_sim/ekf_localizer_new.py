@@ -43,10 +43,6 @@ class EKF_Localizer:
         self.x = np.array([start_x, start_y, start_heading, 0, 0], dtype=float)
 
         # H matricies to convert state vector x into sensor measurement
-        # gps angle measurement
-        self.H_ang = np.array([
-            [0, 0, 1, 0, 0]
-        ])
         # drive encoder measurement
         self.H_enc = np.array([
             [0, 0, 0, 1, 0]
@@ -67,21 +63,31 @@ class EKF_Localizer:
             [0, 0.01698 ** 2]
         ])
 
-        # 1x1 covariance matrix for heading from GPS
-        self.R_heading = self.make_R_heading(self.R_gps_zed, self.R_gps_gem, start_heading, dist_between_gps)
-
         
         # TODO: need to find drive encoder velocity covariance with data
         self.R_enc = np.zeros((1, 1))
+        self.R_enc[0,0] = 0.01
 
-        # TODO: find Q matrix
         self.gyro_stdev = 2.44e-4
         self.accel_stdev = 1.47e-3
         # represents the stddev of the amount the bias increases per sec
         self.bias_walk_rate_stdev = 3.4e-5 # shaky
 
         # matrix reprsenting covariance of error between current estimated state and true state
-        self.est_error_cov = np.zeros((NUM_STATES, NUM_STATES))
+        # these are 1-sigma guesses at how wrong the starting state is: how far
+        # off (start_x, start_y, start_heading) are, plus the fact that forward
+        # velocity and gyro bias both just start at 0.
+        # NOTE: zeros here means "the initial guess is exact". that locks every
+        # kalman gain to 0, and with Q[0,0] at 1e-9 the position variance then
+        # recovers at 5e-8 per second, so the filter can never pull in off a bad
+        # start. it has to begin with honest uncertainty.
+        self.est_error_cov = np.diag([
+            0.5 ** 2,                   # start_x, m
+            0.5 ** 2,                   # start_y, m
+            math.radians(5) ** 2,       # start_heading
+            0.5 ** 2,                   # forward velocity, m/s
+            math.radians(0.5) ** 2,     # gyro bias, rad/s
+        ])
 
         self.prev_update_time = None
         self.last_gyro_heading_vel = 0.0
@@ -95,23 +101,7 @@ class EKF_Localizer:
         Q[3,3] = (self.accel_stdev ** 2) * dt
         Q[4,4] = (self.bias_walk_rate_stdev ** 2) * dt
         return Q
-
-    # the covariance of the gps angle measurement can be directly derived from
-    # the coviarance of the gps position
-    # R_gps1 and R_gps2 should both have shape (2,2)
-    # returns a 1x1 matrix
-    def make_R_heading(self, R_gps1, R_gps2, expected_heading: float, dist_between_gps:float):
-        assert R_gps1.shape == R_gps2.shape == (2,2)
-        variance_x = R_gps1[0,0] + R_gps2[0,0]
-        variance_y = R_gps1[1,1] + R_gps2[1,1]
-        expected_delta_x = math.cos(expected_heading) * dist_between_gps
-        expected_delta_y = math.sin(expected_heading) * dist_between_gps
-
-        a = -expected_delta_y / (dist_between_gps ** 2)
-        b = expected_delta_x / (dist_between_gps ** 2)
-
-        return np.array([[(a ** 2) * variance_x + (b ** 2) * variance_y]])
-    
+   
     # h(x) = [pos_x, pos_y] + R(heading) @ offset_body
     # this returns the predicted gps position and the H matrix b/c h(x) is a nonlinear function
     # so it is better to directly evaluate predicted_gps_position than to use H to find linearized version
@@ -130,52 +120,64 @@ class EKF_Localizer:
         H[1,2] =  lx * c - ly * s
         return predicted_gps_pos, H
 
-    # predicts the next state with euler integration
+    # predicts the next state with midpoint integration
     def predict_next_state(self, x, dt: float, accel_fwd: float, ang_vel_gyro: float):
-        assert x.shape == (NUM_STATES,)
         """
-        Euler integration:
-            position += velocity * dt
+        Midpoint integration:
+            position += velocity_at_midpoint * dt, aimed along heading_at_midpoint
             velocity += accel * dt
+            heading  += heading_rate * dt
         """
+        assert x.shape == (NUM_STATES,)
         pos_x, pos_y, heading, speed_fwd, bias_gyro = x
 
-        cos_h = math.cos(heading)
-        sin_h = math.sin(heading)
-        vx = speed_fwd * cos_h
-        vy = speed_fwd * sin_h
+        heading_rate = ang_vel_gyro - bias_gyro
+        heading_mid = heading + 0.5 * heading_rate * dt
+        speed_mid = speed_fwd + 0.5 * accel_fwd * dt
 
-        pos_x += vx * dt
-        pos_y += vy * dt
+        pos_x += speed_mid * math.cos(heading_mid) * dt
+        pos_y += speed_mid * math.sin(heading_mid) * dt
         speed_fwd += accel_fwd * dt
-        heading += (ang_vel_gyro - bias_gyro) * dt
-        heading = wrap(heading)
+        heading = wrap(heading + heading_rate * dt)
         return np.array([pos_x, pos_y, heading, speed_fwd, bias_gyro])
 
 
     # F is the jacobian of function f(x, u) with respect to x taken at x
-    # f(x, u) is the function specifying the euler integration used in predict_next_state
+    # f(x, u) is the function specifying the midpoint integration used in predict_next_state
     # this needs to be recalculated every loop because F is a linearization of partial derivative of f(x, u)
     # because f(x, u) is a nonlinear function (as seen below with the cos and sin)
+    # the partials are taken at the MIDPOINT heading and speed, and the gyro
+    # bias moves position too (it shifts heading_mid), which is where the
+    # dt^2 terms in column 4 come from - plain euler had no such terms.
+    # takes the same arguments as predict_next_state so the two cannot silently
+    # drift apart; check_jacobians finite-differences one against the other.
     # F is nxn matrix
-    def build_F(self, heading: float, velocity: float, dt: float):
+    def build_F(self, x, dt: float, accel_fwd: float, ang_vel_gyro: float):
+        assert x.shape == (NUM_STATES,)
+        pos_x, pos_y, heading, speed_fwd, bias_gyro = x
+
+        heading_rate = ang_vel_gyro - bias_gyro
+        heading_mid = heading + 0.5 * heading_rate * dt
+        speed_mid = speed_fwd + 0.5 * accel_fwd * dt
+        cos_mid = math.cos(heading_mid)
+        sin_mid = math.sin(heading_mid)
+
         F = np.eye(NUM_STATES)
-        cos_h = math.cos(heading)
-        sin_h = math.sin(heading)
-        F[0,2] = -velocity * sin_h * dt
-        F[0,3] = cos_h * dt
-        F[1,2] = velocity * cos_h * dt
-        F[1,3] = sin_h * dt
+        F[0,2] = -speed_mid * sin_mid * dt
+        F[0,3] = cos_mid * dt
+        F[0,4] = 0.5 * speed_mid * sin_mid * (dt ** 2)
+        F[1,2] = speed_mid * cos_mid * dt
+        F[1,3] = sin_mid * dt
+        F[1,4] = -0.5 * speed_mid * cos_mid * (dt ** 2)
         F[2,4] = -dt
         return F
 
     # uses F and Q to update the error covariance
     # (the covariance would normally grow)
     # this is a standard formula
-    def propogate_error_through_model(self, x, dt: float):
+    def propogate_error_through_model(self, x, dt: float, accel_fwd: float, ang_vel_gyro: float):
         assert x.shape == (NUM_STATES,)
-        pos_x, pos_y, heading, velocity, bias_gyro = x
-        F = self.build_F(heading, velocity, dt)
+        F = self.build_F(x, dt, accel_fwd, ang_vel_gyro)
         Q = self.make_Q(dt)
         return F @ self.est_error_cov @ F.T + Q
 
@@ -198,17 +200,17 @@ class EKF_Localizer:
     # measurement: m
     # H: mxn
     # returns new state vector (vector w n entries)
-    def update_state_with_measurement(self, x, kalman_gain, measurement, H, angular:bool=False, predicted_measurement=None):
+    def update_state_with_measurement(self, x, kalman_gain, measurement, H, predicted_measurement=None):
         assert x.shape == (NUM_STATES,)
         num_measurements = measurement.shape[0]
         assert kalman_gain.shape == (NUM_STATES,num_measurements)
         assert H.shape == (num_measurements,NUM_STATES)
         
         if predicted_measurement is None:
+            # mx1                  mxn nx1
             predicted_measurement = H @ x
         innovation = measurement - predicted_measurement
-        if angular:
-            innovation[0] = wrap(innovation[0])
+        #              nxm          mx1
         x_new = x + kalman_gain @ innovation
         x_new[2] = wrap(x_new[2])
         return x_new
@@ -229,13 +231,10 @@ class EKF_Localizer:
     # imu_accel is [ax, ay], (control input to the prediction)
     # gyro_heading_vel is scalar (control input to the prediction)
     # gps_position is [eastward meters, northward meters] 
-    # gps_heading is scalar (measurement)
     # drive_encoder_vel is scalar (measurement)
-    def update(self, imu_accel, gyro_heading_vel, gps_zed_position, gps_gem_position, gps_heading, drive_encoder_vel, cur_time=None):
+    def update(self, imu_accel, gyro_heading_vel, gps_zed_position, gps_gem_position, drive_encoder_vel, cur_time=None):
         cur_time = cur_time if cur_time is not None else time.monotonic()
         dt = cur_time - self.prev_update_time if self.prev_update_time is not None else 1. / DEFAULT_HZ
-
-        self.R_heading = self.make_R_heading(self.R_gps_gem, self.R_gps_zed, self.get_heading_rad(), self.dist_between_gps)
 
         # update state with model and update error covariance when either accel or gyro is not null
         if imu_accel is not None or gyro_heading_vel is not None:
@@ -244,16 +243,11 @@ class EKF_Localizer:
             accel_x, accel_y = imu_accel if imu_accel is not None else (0, 0)
             # if gyro data is None, assume previous gyro data (not sure if there is a better way to do this)
             self.last_gyro_heading_vel = gyro_heading_vel if gyro_heading_vel is not None else self.last_gyro_heading_vel
-            self.est_error_cov = self.propogate_error_through_model(self.x, dt)
+            self.est_error_cov = self.propogate_error_through_model(self.x, dt, accel_x, self.last_gyro_heading_vel)
             self.x = self.predict_next_state(self.x, dt, accel_x, self.last_gyro_heading_vel)
 
         # update state with measurements and update error covariance
         # read in gps position measurement(s)
-        # CLAUDE CHANGED THIS
-        # the raw sensor R is used now (R_gps_zed / R_gps_gem), not an inflated
-        # "kart position" R. the heading-induced uncertainty is no longer our job
-        # to precompute - it falls out of H @ P @ H.T. each GPS also updates
-        # independently on its own arrival, so the two never need to be synced.
         gps_info = [] # list of tuples (position, R, offset from kart)
         if gps_zed_position is not None:
             gps_info.append((gps_zed_position, self.R_gps_zed, ZED_GPS_OFFSET_M))
@@ -274,16 +268,6 @@ class EKF_Localizer:
                 predicted_measurement=predicted_gps_pos,
             )
             self.est_error_cov = self.update_error_after_measurement(kalman_gain, H_gps, self.est_error_cov)
-
-        # update state with gps heading measurement
-        # NOTE: with nonzero lever arms the GPS position updates above already
-        # carry some heading information, and gps_heading is derived from those
-        # same two receivers - so this channel partially double counts them.
-        # left in for now; see if it fights the gyro once the offsets are measured.
-        if gps_heading is not None:
-            kalman_gain = self.calculate_kalman_gain(self.est_error_cov, self.H_ang, self.R_heading)
-            self.x = self.update_state_with_measurement(self.x, kalman_gain, np.array([gps_heading]), self.H_ang, angular=True)
-            self.est_error_cov = self.update_error_after_measurement(kalman_gain, self.H_ang, self.est_error_cov)
 
         # update state with drive encoder measurement
         if drive_encoder_vel is not None:
