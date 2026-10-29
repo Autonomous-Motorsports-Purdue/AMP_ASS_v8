@@ -20,6 +20,45 @@ class KinematicBicycleModel:
         self.heading += angular_velocity * self.dt
         self.heading = (self.heading + math.pi) % (2*math.pi) - math.pi
 
+# ================= Bicycle Model (steering command input) =================
+class BicycleModel:
+    """
+    Kinematic bicycle driven directly by the normalized steering command (-1..1).
+    curvature = kappa_slope * (cmd - steering_offset)   ("linear", fitted from logs)
+    curvature = -tan(cmd * max_steer_rad) / wheelbase   ("tan", textbook)
+    Defaults fitted on 2026-05-19-10-58-55 (pure pursuit, RTK FIXED) with sim/model_check.py.
+    The servo responds `delay` seconds after a command; rollout() expects cmd_seq already
+    shifted by that delay (in an MPC, the first delay/dt steps are the commands already sent).
+    """
+    def __init__(self, wheelbase=1.000506, kappa_slope=-0.542, steering_offset=0.063,
+                 delay=0.11, mapping="linear", max_steer_rad=0.5):
+        self.wheelbase = wheelbase
+        self.kappa_slope = kappa_slope
+        self.steering_offset = steering_offset
+        self.delay = delay
+        self.mapping = mapping
+        self.max_steer_rad = max_steer_rad
+
+    def curvature(self, cmd):
+        cmd = np.asarray(cmd, dtype=float)
+        if self.mapping == "tan":
+            return -np.tan(cmd * self.max_steer_rad) / self.wheelbase
+        return self.kappa_slope * (cmd - self.steering_offset)
+
+    def step(self, x, y, yaw, v, cmd, dt):
+        x += v * math.cos(yaw) * dt
+        y += v * math.sin(yaw) * dt
+        yaw += v * float(self.curvature(cmd)) * dt
+        return x, y, yaw
+
+    def rollout(self, x, y, yaw, v_seq, cmd_seq, dt_seq):
+        """Returns an (N+1, 3) array of [x, y, yaw], starting with the initial state."""
+        traj = [(x, y, yaw)]
+        for v, cmd, dt in zip(v_seq, cmd_seq, dt_seq):
+            x, y, yaw = self.step(x, y, yaw, v, cmd, dt)
+            traj.append((x, y, yaw))
+        return np.array(traj)
+
 # ================= MPC Controller =================
 class MPC_Controller:
     def __init__(self, horizon=20, dt_mpc=0.03, wheelbase=2.0, max_steer=np.radians(35)):
