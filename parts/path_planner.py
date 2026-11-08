@@ -2,6 +2,8 @@ from ompl import base as om
 from ompl import geometric as og
 import math
 from enum import Enum
+import numpy as np
+from scipy.ndimage import distance_transform_edt
 
 #An Enum holding directions to simplify later code
 class Direction(float, Enum):
@@ -20,11 +22,17 @@ class PathPlanner():
     #(x, y, steering angle, heading)
     #plans out the path
     #end with a random point, will be given later
-    def plan(self, occ_grid, st, en):
-        #if occupancu grid doesn't exist, return 
+    def plan_RRTStar(self, occ_grid, st, en, clearance_buffer=0.3):
+        #if occupancy grid doesn't exist, return 
         if occ_grid is None:
             return
         self.occ_grid = occ_grid
+        
+        #1 is a free space, and 0 is an obstacle, so the grid must be inverted for calculations
+        empty_space = 1-np.array(occ_grid)
+        distances = distance_transform_edt(empty_space)
+        #any wall closer than the clearance buffer is considered an obstacle
+        costmap = np.where(distances < clearance_buffer, 1, 0)
         
         # the DubinsStateSpace tracks X, Y, and Yaw, while being constrained by the turning radius
         space = om.DubinsStateSpace(self.turning_radius)
@@ -40,9 +48,10 @@ class PathPlanner():
         ss = og.SimpleSetup(space)
         
         stateInformation = ss.getSpaceInformation()
-        #change checking resolution to 1% so that the algorithm checks for collisions more often, so the cart doesn't go through walls
+        #changed checking resolution to 1% so that the algorithm checks for collisions more often, so the cart doesn't go through walls
         stateInformation.setStateValidityCheckingResolution(0.01)
-        validity = valididty_checker(stateInformation, self.occ_grid)
+        #creates a validity checker
+        validity = valididty_checker(stateInformation, costmap)
         #check validity checker
         ss.setStateValidityChecker(validity)
         
@@ -61,14 +70,18 @@ class PathPlanner():
         ss.setStartAndGoalStates(start, end)
         
         obj = om.PathLengthOptimizationObjective(stateInformation)
+        obj.setCostThreshold(om.Cost(15.0))
         ss.setOptimizationObjective(obj)
         
-        #setup path planner to make a path, it uses RRT to make a path
+        #setup path planner to make a path, it uses RRT* to make a path
         planner = og.RRTstar(stateInformation)
         ss.setPlanner(planner)
         
-        #generate path, and pass in a time value to solve it in
-        solved = ss.solve(1.0)
+        time_limit = om.timedPlannerTerminationCondition(5.0)
+        cost_limit = om.exactSolnPlannerTerminationCondition(ss.getProblemDefinition())
+        stop_condition = om.plannerOrTerminationCondition(time_limit, cost_limit)
+        
+        solved = ss.solve(stop_condition)
         #return path
         if solved:
             path = ss.getSolutionPath()
@@ -76,14 +89,70 @@ class PathPlanner():
         else:
             print("No path possible")
             return None
-class valididty_checker(om.StateValidityChecker):
-    def __init__(self, spaceInfo, occ_grid, clearance_buffer = 0.3):
-        super().__init__(spaceInfo)
+
+    #planner function that uses RRT to make a path, this is used for testing purposes
+    def plan_RRT(self, occ_grid, st, en, clearance_buffer=0.3):
+        if occ_grid is None:
+            return
         self.occ_grid = occ_grid
-        self.clearance_buffer = clearance_buffer
+        
+        empty_space = 1 - np.array(occ_grid) 
+        distances = distance_transform_edt(empty_space)
+        costmap = np.where(distances < clearance_buffer, 1, 0)
+        
+        space = om.DubinsStateSpace(self.turning_radius)
+        
+        bounds = om.RealVectorBounds(2)
+        bounds.setLow(0, 0.0)
+        bounds.setHigh(0, float(len(occ_grid)))
+        bounds.setLow(1, 0.0)
+        bounds.setHigh(1, float(len(occ_grid[0])))
+        space.setBounds(bounds)
+        
+        ss = og.SimpleSetup(space)
+        
+        stateInformation = ss.getSpaceInformation()
+        stateInformation.setStateValidityCheckingResolution(0.01)
+        validity = valididty_checker(stateInformation, costmap)
+        ss.setStateValidityChecker(validity)
+        
+        start = space.allocState()
+        start.setX(float(st[0]))
+        start.setY(float(st[1]))
+        start.setYaw(float(st[2])) if len(st) > 2 else start.setYaw(0.0)
+        
+        end = space.allocState()
+        end.setX(float(en[0]))
+        end.setY(float(en[1]))
+        end.setYaw(float(en[2])) if len(en) > 2 else end.setYaw(0.0)
+        
+        ss.setStartAndGoalStates(start, end)
+        
+        planner = og.RRT(stateInformation)
+        ss.setPlanner(planner)
+        
+        # generate path, but terminate early if it takes too long, or costs too much
+        time_limit = om.timedPlannerTerminationCondition(5.0)
+        cost_limit = om.exactSolnPlannerTerminationCondition(ss.getProblemDefinition())
+        stop_condition = om.plannerOrTerminationCondition(time_limit, cost_limit)
+        
+        solved = ss.solve(stop_condition)
+        
+        if solved:
+            path = ss.getSolutionPath()
+            path = path.simplify()
+            return path
+        else:
+            print("No path possible")
+            return None
+
+class valididty_checker(om.StateValidityChecker):
+    def __init__(self, spaceInfo, costmap):
+        super().__init__(spaceInfo)
+        self.costmap = costmap
         
     def isValid(self, state):
-        if self.occ_grid is None:
+        if self.costmap is None:
             return True
         
         #get the x and y variables
@@ -91,74 +160,41 @@ class valididty_checker(om.StateValidityChecker):
         y = state.getY()
         
         #if certain conditions are met, the data is invalid
-        if x - self.clearance_buffer < 0.0 or x + self.clearance_buffer >= len(self.occ_grid) or y - self.clearance_buffer < 0.0 or y + self.clearance_buffer >= len(self.occ_grid[0]):
+        if x < 0.0 or x >= len(self.costmap) or y < 0.0 or y >= len(self.costmap[0]):
             return False
         
-        min_x = int(x - self.clearance_buffer)
-        max_x = int(x + self.clearance_buffer)
-        min_y = int(y - self.clearance_buffer)
-        max_y = int(y + self.clearance_buffer)
+        x = int(x)
+        y = int(y)
         
-        for i in range(min_x, max_x + 1):
-            for j in range(min_y, max_y + 1):
-                if self.occ_grid[i][j] == 1:
-                    return False
-        return True
+        #0 is free space, 1 is an obstacle here
+        return bool(self.costmap[x][y] == 0)
     
 def test_planner():
     grid_size = 10
     occ_grid = [[0 for _ in range(grid_size)] for _ in range(grid_size)]
     
-    for i in range(2, 4):
-        for j in range(2, 5):
-            occ_grid[i][j] = 1
-    
-    for i in range(6, 7):
-        for j in range(4, 7):
-            occ_grid[i][j] = 1
-    for i in range(2, 4):
-        for j in range(2, 5):
-            occ_grid[i][j] = 1
-    
     for i in range(4, 5):
-        for j in range(4, 5):
+        for j in range(3, 4):
             occ_grid[i][j] = 1
-    for i in range(2, 4):
-        for j in range(2, 5):
-            occ_grid[i][j] = 1
-    
-    for i in range(0, 1):
+    for i in range(5, 6):
         for j in range(5, 6):
             occ_grid[i][j] = 1
+    for i in range(5, 6):
+        for j in range(7, 8):
+            occ_grid[i][j] = 1
             
-    for i in range(2, 4):
-        for j in range(2, 5):
-            occ_grid[i][j] = 1
     
-    for i in range(3, 4):
-        for j in range(7, 8):
-            occ_grid[i][j] = 1
-    for i in range(6, 7):
-        for j in range(2, 3):
-            occ_grid[i][j] = 1
-    for i in range(7, 9):
-        for j in range(7, 8):
-            occ_grid[i][j] = 1
-
-    for i in range(0, grid_size):
-        for j in range(0, grid_size):
-            print(str(occ_grid[i][j]), end=",")
-        print("\n")
+    
     planner = PathPlanner(turning_radius=1)
     
     # Define Start and Goal (x, y, heading)
     # Headings for the start and goal must be passed in radians, 0, pi/2, pi, 3pi/2
-    start_pose = (1.5, 1.5, Direction.EAST)
-    goal_pose = (8.5, 9.5, Direction.NORTH)
+    start_pose = (0.5, 5, Direction.EAST)
+    goal_pose = (9.5, 5, Direction.EAST)
     
     print(f"Planning path from {start_pose} to {goal_pose}...")
-    
-    path = planner.plan(occ_grid, start_pose, goal_pose)
+    clearance_buffer  = 0.3 # Minimum distance from obstacles
+    path = planner.plan_RRTStar(occ_grid, start_pose, goal_pose, clearance_buffer)
     
     visualize_path(
         occ_grid=occ_grid,
@@ -185,7 +221,6 @@ def test_planner():
         print("Planner failed to find a valid path.")
 
 #VISUALIZER CODE HERE:
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
