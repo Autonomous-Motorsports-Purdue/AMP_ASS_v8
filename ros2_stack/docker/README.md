@@ -65,6 +65,101 @@ mounted at `/amp`, which is where `gps_paths/`, logs and ONNX models are.
 
 `$AMP_TARGET` inside the container tells you which flavour you are in.
 
+## Run ROS 2 commands
+
+The noVNC desktop is optional. ROS 2 commands can be run either from an
+interactive shell inside the running container or directly from the host with
+`docker compose exec`. The examples below assume the `laptop` service is
+already running:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d --build laptop
+```
+
+### Open a shell inside the container
+
+From `ros2_stack/` on the host:
+
+```bash
+docker compose -f docker/docker-compose.yml exec laptop bash
+```
+
+Then initialize ROS and the built workspace inside the container:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /amp_ws/install/setup.bash
+cd /amp_ws
+```
+
+ROS 2 commands now work normally in that shell:
+
+```bash
+ros2 node list
+ros2 topic list
+ros2 topic hz /lidar/points
+ros2 launch ros2_parts lidar.launch.py
+```
+
+Use `Ctrl+C` to stop a foreground node and `exit` to leave the container
+shell. Exiting the shell or closing noVNC does not stop the container. Source
+files are under `/amp_ws/src/ros2_parts`; do not edit generated copies under
+`/amp_ws/build` or the repository's top-level `build/` directory.
+
+If this is the first run, or package metadata has changed, build the package
+from the container shell:
+
+```bash
+cd /amp_ws
+colcon build --packages-select ros2_parts --symlink-install
+source install/setup.bash
+```
+
+### Run ROS 2 commands directly from the host
+
+An interactive container shell is not required. Each host-side command can
+source ROS and execute the requested operation in one call:
+
+```bash
+docker compose -f docker/docker-compose.yml exec -T laptop bash -lc '. /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; ros2 node list'
+docker compose -f docker/docker-compose.yml exec -T laptop bash -lc '. /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; ros2 topic list'
+docker compose -f docker/docker-compose.yml exec -T laptop bash -lc '. /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; ros2 topic hz /lidar/points'
+```
+
+The same approach builds the workspace without opening the container shell:
+
+```bash
+docker compose -f docker/docker-compose.yml exec -T laptop bash -lc 'cd /amp_ws && colcon build --packages-select ros2_parts --symlink-install'
+```
+
+For a foreground launch that should stop when `Ctrl+C` is pressed, omit `-T`
+and `-d`:
+
+```bash
+docker compose -f docker/docker-compose.yml exec laptop bash -lc '. /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; ros2 launch ros2_parts lidar.launch.py'
+```
+
+To leave a node running in the background, add `-T -d` and redirect its output
+to a file inside the container:
+
+```bash
+docker compose -f docker/docker-compose.yml exec -T -d laptop bash -lc '. /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; exec ros2 launch ros2_parts lidar.launch.py >/tmp/lidar.log 2>&1'
+
+docker compose -f docker/docker-compose.yml exec -T laptop cat /tmp/lidar.log
+```
+
+GUI programs can also be started from the host. They appear on the noVNC
+desktop at <http://localhost:6080>:
+
+```bash
+docker compose -f docker/docker-compose.yml exec -T -d laptop bash -lc 'export DISPLAY=:1; . /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; exec rviz2 -d /amp/ros2_stack/config/lidar.rviz >/tmp/rviz.log 2>&1'
+```
+
+These commands work in PowerShell as written when run from `ros2_stack/`.
+From the repository root, change the Compose path to
+`ros2_stack/docker/docker-compose.yml`. On the kart, use the `amp` service in
+place of `laptop` after starting that service.
+
 ## Does it work?
 
 ```bash
