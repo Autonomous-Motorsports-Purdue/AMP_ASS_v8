@@ -59,6 +59,10 @@ RUN apt update && apt install -y --no-install-recommends \
         gstreamer1.0-tools gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
         python3-tk libgl1-mesa-glx libglib2.0-0 libxkbcommon-x11-0 sudo
 
+# Ubuntu's noVNC package ships vnc.html but no index.html. Make the documented
+# http://localhost:6080 URL open the viewer instead of returning a 404.
+RUN ln -s vnc.html /usr/share/novnc/index.html
+
 
 RUN if getent passwd 1000 >/dev/null; then userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true; fi \
     && useradd -u 1000 -m -s /bin/bash amp \

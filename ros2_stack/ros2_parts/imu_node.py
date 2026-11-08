@@ -13,7 +13,7 @@ from ros2_parts.orientation import yaw_to_quaternion
 
 
 class ImuNode(Node):
-    def __init__(self):
+    def __init__(self): 
         super().__init__("imu")
         port = self.declare_parameter("port", "/dev/ttyACM1").value
         baud = self.declare_parameter("baud", 115200).value

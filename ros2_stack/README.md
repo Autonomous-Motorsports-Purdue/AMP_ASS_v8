@@ -41,6 +41,8 @@ Sensors, poses and images use the standard messages, so the graph works with
 | Topic | Type |
 | --- | --- |
 | `imu/data` | `sensor_msgs/Imu` |
+| `lidar/points` | `sensor_msgs/PointCloud2` |
+| `lidar/occupancy_grid` | `nav_msgs/OccupancyGrid` |
 | `gps/fix`, `gps/fused_fix`, `gps/ekf_fix` | `sensor_msgs/NavSatFix` |
 | `gps/vel`, `gps/ekf_vel` | `geometry_msgs/TwistStamped` |
 | `gps/pose`, `predicted_pose` | `geometry_msgs/PoseStamped` |
@@ -94,6 +96,8 @@ Launch files mirror the runners: [`cte.launch.py`](launch/cte.launch.py)
 (`cte_runner.py`), [`gps_pid.launch.py`](launch/gps_pid.launch.py)
 (`gps_pid_runner.py`) and [`pursuit.launch.py`](launch/pursuit.launch.py)
 (`pursuit_runner.py`), each with a matching file in [`config/`](config/).
+[`lidar.launch.py`](launch/lidar.launch.py) receives Velodyne UDP packets on
+port `2368` and publishes point-cloud and occupancy-grid topics.
 
 ## Nodes
 
@@ -126,6 +130,7 @@ a loop; other parameters are listed at the top of each node's `__init__`.
 | `imu.py` | `imu` | — | `imu/data` |
 | `imu_visualizer.py` | `imu_visualizer` | `imu/data` | — |
 | `lane_detect.py` | `lane_detect` | `camera/left/image_raw` | `perception/midline`, annotated image |
+| `lidar` | `lidar` | Velodyne UDP on port `2368` | `lidar/points`, `lidar/occupancy_grid` |
 | `log.py` | `log` | object centroid, area | — |
 | `logger.py` | `logger` | frames + commands | — |
 | `logger2.py` | `logger2` | any `Float64` topics (`topics` param) | — |

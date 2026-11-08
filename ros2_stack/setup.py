@@ -41,6 +41,7 @@ setup(
             'gps_csv = ros2_parts.gps_csv_node:main',
             'image_publisher = ros2_parts.image_publisher_node:main',
             'imu = ros2_parts.imu_node:main',
+            'lidar = ros2_parts.lidar_node:main',
             'zed_frame_publisher = ros2_parts.zed_frame_publisher_node:main',
 
             # -- Simulated sensors -----------------------------------------

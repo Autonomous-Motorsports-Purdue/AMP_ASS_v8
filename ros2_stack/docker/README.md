@@ -37,9 +37,9 @@ Open <http://localhost:6080> to use the laptop container's desktop. An xterm
 terminal opens automatically; run `rqt_graph` there to view active ROS nodes.
 The GUI does not start application launch files automatically; start your
 normal ROS nodes or launch file inside the container for them to appear.
-The VNC server is only reachable inside the container, and noVNC is published
-on the host loopback address without a password. Do not change the port binding
-to a public interface.
+The VNC server is only reachable inside the container, and noVNC listens on
+the host loopback address without a password. Do not change that listener to a
+public interface.
 
 On the kart:
 
@@ -99,10 +99,32 @@ throwaway copy instead, point the mount somewhere else:
       - ..:/amp_ws/src/ros2_parts:ro   # read-only; colcon then needs --no-symlink
 ```
 
+## LiDAR on the laptop target
+
+The Velodyne is the exception to the laptop target's USB hardware limitation:
+it sends UDP over Ethernet. The laptop service uses host networking because
+Docker's bridged UDP forwarding can drop the high-rate packet stream even when
+`docker ps` shows `2368/udp` published. Configure the Velodyne destination IP
+to the computer's wired Ethernet IPv4 address, then start the node inside the
+container:
+
+```bash
+ros2 launch ros2_parts lidar.launch.py
+ros2 topic hz /lidar/points
+```
+
+If the sensor uses a non-default data port, set the same port on both sides.
+Launch with `port:=12345`, for example. Allow that inbound UDP port through the
+host firewall. The node logs whether it sees no UDP packets or sees packets
+that do not decode, which separates Docker/network problems from data-format
+problems. Docker Desktop must have host networking enabled; on native Linux it
+works without an extra Docker setting.
+
 ## What does not work on the laptop target
 
 `zed_frame_publisher` (no SDK), and anything that opens a real serial port or
-camera: `gps`, `imu`, `bno086`, `uart*`, `frame_publisher`. Use `fake_gps`,
+camera: `gps`, `imu`, `bno086`, `uart*`, `frame_publisher`. Ethernet LiDAR is
+supported. Use `fake_gps`,
 `fake_imu`, `gps_csv` and `image_publisher` instead. `onnx` and `segment_model`
 run on CPU, so they are correct but slow.
 
@@ -139,9 +161,9 @@ X11 forwarding is needed.
 
 Start with `docker compose -f docker/docker-compose.yml up --build laptop`,
 open <http://localhost:6080>, then run `rqt_graph` in the desktop terminal.
-The host port is bound to `127.0.0.1`; VNC port 5901 is not published to the
-host. The local noVNC connection has no password by default, so keep the
-loopback-only port binding. This setup does not configure VNC password
+noVNC is bound to `127.0.0.1`; VNC port 5901 is not exposed to the host. The
+local noVNC connection has no password by default, so keep the loopback-only
+listener. This setup does not configure VNC password
 authentication or a `VNC_PASSWORD` option.
 
 If port 6080 is already in use, choose another host port while keeping the
