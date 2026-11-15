@@ -1,7 +1,6 @@
 """Bring up the cross-track-error driving stack.
 
-The ROS 2 equivalent of ``cte_runner.py``: the same parts, in the same wiring,
-each as its own node. Every node reads ``config/cte.yaml``.
+Every node reads ``config/cte.yaml``.
 
     ros2 launch ros2_parts cte.launch.py path_csv:=/abs/path/to/path_xy_throttle.csv
 """
@@ -12,7 +11,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
-#: Executables to launch, in the order ``cte_runner.py`` adds them.
+#: Executables to launch in dependency order.
 NODES = [
     'loop_clock',
     'gstreamer_video_sync',

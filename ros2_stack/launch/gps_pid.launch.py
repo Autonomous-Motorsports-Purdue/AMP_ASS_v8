@@ -1,7 +1,5 @@
 """Bring up the GPS PID path-following stack.
 
-The ROS 2 equivalent of ``gps_pid_runner.py``.
-
     ros2 launch ros2_parts gps_pid.launch.py path_csv:=/abs/path/to/path.csv
 """
 
@@ -11,7 +9,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
-#: Executables to launch, in the order ``gps_pid_runner.py`` adds them.
+#: Executables to launch in dependency order.
 NODES = [
     'health_check',
     'uart_backup',

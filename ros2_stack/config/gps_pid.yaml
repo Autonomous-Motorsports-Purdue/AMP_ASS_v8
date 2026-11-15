@@ -1,4 +1,4 @@
-# Parameters for gps_pid.launch.py, mirroring the values in gps_pid_runner.py.
+# Parameters for gps_pid.launch.py.
 
 health_check:
   ros__parameters:
@@ -22,8 +22,7 @@ gps:
     port: /dev/ttyACM2
     rate_hz: 30.0
 
-# The datum. gps_pid_runner.py took this from the first row of the waypoint
-# CSV; set it to that same point.
+# Set the datum to the first point in the waypoint CSV.
 gps_to_xy:
   ros__parameters:
     ref_lat_deg: 40.4237

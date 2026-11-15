@@ -1,5 +1,4 @@
 __pycache__/
-donkeycar_env/
 data/
 *.tar.gz
 *.whl

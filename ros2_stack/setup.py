@@ -1,9 +1,4 @@
-"""Build configuration for the ros2_parts package.
-
-Every Donkeycar part in ``parts/`` becomes one executable here. The names match
-the part module they came from, so ``ros2 run ros2_parts gps_to_xy`` runs the
-port of ``parts/gps_to_xy.py``.
-"""
+"""Build configuration for the AMP ROS 2 node package."""
 
 from glob import glob
 import os
@@ -26,10 +21,7 @@ setup(
     zip_safe=True,
     maintainer='Cole Byrne',
     maintainer_email='colewbyrne@gmail.com',
-    description=(
-        'ROS 2 nodes for the AMP autonomous software stack, ported one-for-one '
-        'from the Donkeycar parts of the same name.'
-    ),
+    description='ROS 2 nodes for the AMP autonomous software stack.',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={

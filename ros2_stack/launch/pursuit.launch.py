@@ -1,9 +1,7 @@
 """Bring up the camera-based pure pursuit stack.
 
-The ROS 2 equivalent of ``pursuit_runner.py``. Segmentation comes from the
-``onnx`` node, which publishes the masks ``curve_fit`` consumes; the runner
-wired ``segment_model`` to those names but that part returns a different set of
-outputs.
+Segmentation comes from the ``onnx`` node, which publishes the masks consumed
+by ``curve_fit``.
 
     ros2 launch ros2_parts pursuit.launch.py
 """
@@ -14,7 +12,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
-#: Executables to launch, in the order ``pursuit_runner.py`` adds them.
+#: Executables to launch in dependency order.
 NODES = [
     'health_check',
     'frame_publisher',

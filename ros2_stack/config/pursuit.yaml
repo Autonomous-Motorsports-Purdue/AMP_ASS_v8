@@ -1,4 +1,4 @@
-# Parameters for pursuit.launch.py, mirroring the values in pursuit_runner.py.
+# Parameters for pursuit.launch.py.
 
 health_check:
   ros__parameters:

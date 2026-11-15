@@ -3,7 +3,7 @@
 ROS 2 orientation is an ENU quaternion: yaw counter-clockwise from east, in
 radians. Several of these sensors and controllers speak compass degrees, so
 the conversions live here instead of in every node. The quaternion helpers
-are the ones from parts/bno086.py.
+match the BNO086 serial protocol used by this package.
 """
 
 import math

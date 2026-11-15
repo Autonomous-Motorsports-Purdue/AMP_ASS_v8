@@ -15,7 +15,7 @@ class HealthCheckNode(Node):
         host_port = self.declare_parameter("host_port", 6000).value
         rate_hz = self.declare_parameter("rate_hz", 30.0).value
 
-        # the donkeycar part always returned True; the real check only runs when enabled
+        # The real network check only runs when enabled.
         self.clientSocket = None
         if self.enabled:
             self.clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

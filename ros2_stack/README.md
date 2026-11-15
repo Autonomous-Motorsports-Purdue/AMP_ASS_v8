@@ -1,8 +1,7 @@
 # ros2_parts
 
-ROS 2 (Humble / Ubuntu 22.04) port of the Donkeycar stack in [`parts/`](../parts).
-Every part is now a plain `rclpy` node speaking standard ROS interfaces.
-Nothing in this package imports Donkeycar.
+ROS 2 Humble nodes for the AMP autonomous software stack on Ubuntu 22.04.
+Every component is a plain `rclpy` node speaking standard ROS interfaces.
 
 ## Shape of a node
 
@@ -21,9 +20,8 @@ class ImuNode(Node):
         self.create_timer(1.0 / rate_hz, self.run)
 ```
 
-Each file starts with a one-line `# in: ... | out: ...` comment, and the
-callback that does the part's work is called `run`, like the Donkeycar part it
-came from.
+Each file starts with a one-line `# in: ... | out: ...` comment. Timer-driven
+callbacks are conventionally named `run`.
 
 Two small modules are shared: [`orientation.py`](ros2_parts/orientation.py)
 (quaternion and angle conversions) and [`geometry.py`](ros2_parts/geometry.py)
@@ -84,7 +82,7 @@ ONNX or GStreamer nodes does not need those libraries.
 ## Run
 
 ```bash
-# The whole CTE stack, the way cte_runner.py wires it
+# The complete CTE stack
 ros2 launch ros2_parts cte.launch.py path_csv:=/abs/path/to/path_xy_throttle.csv
 
 # Or one node at a time
@@ -92,10 +90,10 @@ ros2 run ros2_parts gps --ros-args -p port:=/dev/ttyACM0
 ros2 topic echo /gps/fix
 ```
 
-Launch files mirror the runners: [`cte.launch.py`](launch/cte.launch.py)
-(`cte_runner.py`), [`gps_pid.launch.py`](launch/gps_pid.launch.py)
-(`gps_pid_runner.py`) and [`pursuit.launch.py`](launch/pursuit.launch.py)
-(`pursuit_runner.py`), each with a matching file in [`config/`](config/).
+The main stacks are [`cte.launch.py`](launch/cte.launch.py),
+[`gps_pid.launch.py`](launch/gps_pid.launch.py), and
+[`pursuit.launch.py`](launch/pursuit.launch.py), each with a matching file in
+[`config/`](config/).
 [`lidar.launch.py`](launch/lidar.launch.py) receives Velodyne UDP packets on
 port `2368` and publishes point-cloud and occupancy-grid topics.
 
@@ -155,20 +153,14 @@ a loop; other parameters are listed at the top of each node's `__init__`.
 The algorithms are unchanged. These are the places where moving onto standard
 messages changed a number, and each one can affect how the kart drives:
 
-* **Yaw rate is now radians per second.** `sensor_msgs/Imu` specifies that
-  unit; the Donkeycar IMU part passed the board's degrees per second straight
-  through, and `ClosedLoopController` subtracted it from the MPC's radians per
-  second. That mismatch is gone, which means **the closed-loop gains need
-  retuning** — the error term is now about 57x smaller.
-* **The EKF gets its heading in degrees.** `gps_mpc_runner.py` fed
-  `ekf_localizer` the IMU part's yaw in radians into an argument the filter
-  converted as degrees, so its body-to-world rotation was wrong. It is now
-  taken from the orientation quaternion in the right units.
+* **Yaw rate is radians per second.** This is the unit required by
+  `sensor_msgs/Imu`; closed-loop controller gains must be tuned for that unit.
+* **The EKF gets its heading in degrees.** It is derived from the orientation
+  quaternion before the body-to-world rotation is calculated.
 * **IMU accuracy rides in `orientation_covariance`.** `heading_fusion` reads
   its rejection threshold from there rather than from a separate topic.
-* **The health check can actually check.** The part had a real socket check
-  behind an unconditional `return True`. It is implemented and gated behind
-  `enabled`, which defaults to false so the shipped behaviour is unchanged.
+* **The health check is optional.** The real socket check is gated behind
+  `enabled`, which defaults to false.
 * **The UART nodes fail safe.** A heartbeat or fix topic that has never been
   published now stops the kart, rather than being read as a missing value.
 
@@ -182,7 +174,7 @@ Smaller notes:
   carried over.
 * `logger2` now names its topics by parameter. For anything you intend to keep,
   `ros2 bag record` is the better tool.
-* Dead code in the parts is dropped rather than ported: `cte_controller`'s
+* Dead code is omitted: `cte_controller`'s
   zero-step prediction (so it no longer needs `gps/pose` or `gps/vel`),
   `pure_pursuit`'s speed logic that was always overwritten by the constant
   speed, and `pure_pursuit_controller`'s debug dictionary.
@@ -195,15 +187,12 @@ Smaller notes:
 
 ## The cross-track sign
 
-`cte_controller` was the last thing importing Donkeycar, for `la.Line3D`,
-`la.Vec3` and `utils.dist`. Those are now
+`cte_controller` uses the local helpers in
 [`geometry.py`](ros2_parts/geometry.py).
 
-The sign matters — it decides which way the kart steers off-path — and the
-Donkeycar submodule is not checked out here, so it was derived rather than
-copied: positive error means the kart is left of the path, which the PID turns
-into a rightward correction. `cross_track_error` reproduces the original's 3D
-embedding exactly on random inputs, and the convention is pinned by
+The sign matters — it decides which way the kart steers off-path. Positive
+error means the kart is left of the path, which the PID turns into a rightward
+correction. The convention is pinned by
 [`test_geometry.py`](test/test_geometry.py). **Confirm it on the kart at low
 speed before trusting it at pace.**
 

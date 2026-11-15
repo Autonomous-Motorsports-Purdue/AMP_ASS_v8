@@ -174,9 +174,9 @@ colcon build, a live two-node ROS graph (`fake_gps` -> `gps_to_xy` ->
 the CUDA provider, `pyzed` and visible serial devices. It exits non-zero if
 anything fails, so it works as a CI gate. `--no-build` skips the colcon steps.
 
-Expected on the laptop target: `24 passed, 0 failed, 1 skipped`. The unit tests
-report one pre-existing failure (`normalize_quaternion`), which is a bug in the
-package, not the container.
+The current unit suite contains 41 tests. One pre-existing assertion fails in
+`normalize_quaternion`; the container and package build still complete
+successfully.
 
 ## The source mount is read-write
 

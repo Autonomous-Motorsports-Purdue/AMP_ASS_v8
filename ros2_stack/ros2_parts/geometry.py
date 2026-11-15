@@ -1,7 +1,6 @@
 """Path geometry for the cross-track controller.
 
-Replaces the donkeycar.la helpers (la.Line3D, la.Vec3, utils.dist) the
-cte_controller part imported, so nothing here depends on donkeycar.
+Geometry helpers used by the cross-track-error controller.
 
 The sign matters. The error goes straight into a PID whose output is a
 steering command, so an inverted sign steers the wrong way.

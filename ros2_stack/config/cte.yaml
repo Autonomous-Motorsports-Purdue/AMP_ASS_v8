@@ -1,6 +1,5 @@
-# Parameters for cte.launch.py, mirroring the values in cte_runner.py.
-# The Donkeycar runner drove every part at 50 Hz; here each node has its own
-# rate, so the sensors and the controller can run at rates that suit them.
+# Parameters for cte.launch.py. Each node has its own rate so sensors and the
+# controller can run at rates that suit them.
 
 loop_clock:
   ros__parameters:
@@ -16,7 +15,7 @@ gstreamer_video_sync:
 
 health_check:
   ros__parameters:
-    # The Donkeycar part always reported healthy; set true to really check.
+    # Set true to enable the network health check.
     enabled: false
     host_ip: 192.168.12.25
     host_port: 6000
@@ -41,8 +40,8 @@ bno086:
     declination: -4.55
     rate_hz: 50.0
 
-# The datum both frame conversions are anchored at. cte_runner.py took this
-# from the first row of the waypoint CSV; set it to that same point.
+# The datum both frame conversions are anchored at. Set it to the first point
+# in the waypoint CSV.
 gps_to_xy:
   ros__parameters:
     ref_lat_deg: 40.4237
@@ -61,7 +60,7 @@ heading_fusion:
     min_gps_speed_mps: 1.0
     max_imu_accuracy_deg: 15.0
 
-# cte_runner.py expects the "<path>_xy_throttle.csv" naming convention.
+# The path CSV contains x, y, and optional throttle columns.
 cte_controller:
   ros__parameters:
     kp: 0.25

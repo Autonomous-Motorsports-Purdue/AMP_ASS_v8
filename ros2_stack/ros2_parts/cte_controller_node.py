@@ -12,7 +12,7 @@ from ros2_parts.geometry import cross_track_error
 
 
 class PIDController:
-    # donkeycar/parts/transform.py
+    # Cross-track error is positive to the left of the path.
     def __init__(self, p=0, i=0, d=0):
         self.Kp = p
         self.Ki = i

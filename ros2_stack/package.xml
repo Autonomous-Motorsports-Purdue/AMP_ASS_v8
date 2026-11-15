@@ -4,8 +4,7 @@
   <name>ros2_parts</name>
   <version>0.1.0</version>
   <description>
-    ROS 2 nodes for the AMP autonomous software stack, ported one-for-one from
-    the Donkeycar parts of the same name.
+    ROS 2 nodes for the AMP autonomous software stack.
   </description>
   <maintainer email="colewbyrne@gmail.com">Cole Byrne</maintainer>
   <license>Apache-2.0</license>
