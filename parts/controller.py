@@ -46,10 +46,10 @@ class BicycleModel:
         return self.kappa_slope * (cmd - self.steering_offset)
 
     def step(self, x, y, yaw, v, cmd, dt):
-        x += v * math.cos(yaw) * dt
-        y += v * math.sin(yaw) * dt
-        yaw += v * float(self.curvature(cmd)) * dt
-        return x, y, yaw
+        # numpy ops, no in-place +=, so the same call also rolls out a batch of windows (arrays) at once
+        return (x + v * np.cos(yaw) * dt,
+                y + v * np.sin(yaw) * dt,
+                yaw + v * self.curvature(cmd) * dt)
 
     def rollout(self, x, y, yaw, v_seq, cmd_seq, dt_seq):
         """Returns an (N+1, 3) array of [x, y, yaw], starting with the initial state."""
@@ -57,6 +57,86 @@ class BicycleModel:
         for v, cmd, dt in zip(v_seq, cmd_seq, dt_seq):
             x, y, yaw = self.step(x, y, yaw, v, cmd, dt)
             traj.append((x, y, yaw))
+        return np.array(traj)
+
+
+class LagBicycleModel(BicycleModel):
+    """
+    BicycleModel whose curvature follows the command through a first-order lag (time constant tau)
+    on top of the pure delay: servo slew plus tire force build-up. Starts settled on the first command.
+    """
+    def __init__(self, tau=0.15, **kwargs):
+        super().__init__(**kwargs)
+        self.tau = tau
+
+    def rollout(self, x, y, yaw, v_seq, cmd_seq, dt_seq):
+        kappa = self.curvature(cmd_seq[0])
+        traj = [(x, y, yaw)]
+        for v, cmd, dt in zip(v_seq, cmd_seq, dt_seq):
+            kappa = kappa + (self.curvature(cmd) - kappa) * (1.0 - np.exp(-dt / max(self.tau, 1e-3)))
+            x, y, yaw = x + v * np.cos(yaw) * dt, y + v * np.sin(yaw) * dt, yaw + v * kappa * dt
+            traj.append((x, y, yaw))
+        return np.array(traj)
+
+
+class UndersteerBicycleModel(BicycleModel):
+    """
+    BicycleModel with speed-dependent understeer: curvature = kappa_cmd / (1 + k_us * v^2).
+    This is the steady-state turn of a linear-tire dynamic bicycle; k_us = 0 is the plain model.
+    """
+    def __init__(self, k_us=0.0, **kwargs):
+        super().__init__(**kwargs)
+        self.k_us = k_us
+
+    def step(self, x, y, yaw, v, cmd, dt):
+        kappa = self.curvature(cmd) / (1.0 + self.k_us * v * v)
+        return x + v * np.cos(yaw) * dt, y + v * np.sin(yaw) * dt, yaw + v * kappa * dt
+
+
+class DynamicBicycleModel(BicycleModel):
+    """
+    Linear-tire dynamic bicycle: adds lateral velocity vy and yaw rate r (body frame, at the centre of mass).
+    Front wheel angle comes from the fitted command map, small-angle: delta = wheelbase * kappa_cmd, so with
+    neutral steer (cf*lf == cr*lr) it turns exactly like BicycleModel. cf, cr (cornering stiffness, N/rad)
+    are fitted; mass, lf and iz are placeholders until the kart is weighed (iz ~ m*lf*lr rule of thumb).
+    yaw in and out is the course (direction of travel, what GPS heading measures), not the body heading.
+    """
+    def __init__(self, cf=8000.0, cr=8000.0, mass=150.0, lf=None, iz=None, min_vx=0.3, **kwargs):
+        super().__init__(**kwargs)
+        self.cf, self.cr, self.mass, self.min_vx = cf, cr, mass, min_vx
+        self.lf = self.wheelbase / 2 if lf is None else lf
+        self.lr = self.wheelbase - self.lf
+        self.iz = self.mass * self.lf * self.lr if iz is None else iz
+
+    def _ab(self, vx):
+        """d/dt [vy, r] = A [vy, r] + b * delta, returned as (a11, a12, a21, a22, b1, b2)."""
+        m, iz, lf, lr, cf, cr = self.mass, self.iz, self.lf, self.lr, self.cf, self.cr
+        return (-(cf + cr) / (m * vx), -(cf * lf - cr * lr) / (m * vx) - vx,
+                -(cf * lf - cr * lr) / (iz * vx), -(cf * lf ** 2 + cr * lr ** 2) / (iz * vx),
+                cf / m, cf * lf / iz)
+
+    def rollout(self, x, y, yaw, v_seq, cmd_seq, dt_seq):
+        # start in steady-state cornering on the first command: [vy, r] = -A^-1 b delta
+        vx = np.maximum(v_seq[0], self.min_vx)  # slip angles divide by vx
+        a11, a12, a21, a22, b1, b2 = self._ab(vx)
+        d = self.wheelbase * self.curvature(cmd_seq[0])
+        det = a11 * a22 - a12 * a21
+        vy, r = -(a22 * b1 - a12 * b2) * d / det, -(a11 * b2 - a21 * b1) * d / det
+        psi = yaw - np.arctan2(vy, vx)  # body heading = course - sideslip
+        traj = [(x, y, yaw)]
+        for v, cmd, dt in zip(v_seq, cmd_seq, dt_seq):
+            vx = np.maximum(v, self.min_vx)
+            a11, a12, a21, a22, b1, b2 = self._ab(vx)
+            d = self.wheelbase * self.curvature(cmd)
+            # implicit Euler, (I - dt A) s' = s + dt b d: tire modes are ~10 ms at walking pace, too stiff for explicit steps
+            m11, m12, m21, m22 = 1 - dt * a11, -dt * a12, -dt * a21, 1 - dt * a22
+            r1, r2 = vy + dt * b1 * d, r + dt * b2 * d
+            det = m11 * m22 - m12 * m21
+            vy, r = (m22 * r1 - m12 * r2) / det, (m11 * r2 - m21 * r1) / det
+            x = x + (v * np.cos(psi) - vy * np.sin(psi)) * dt
+            y = y + (v * np.sin(psi) + vy * np.cos(psi)) * dt
+            psi = psi + r * dt
+            traj.append((x, y, psi + np.arctan2(vy, vx)))
         return np.array(traj)
 
 # ================= MPC Controller =================
