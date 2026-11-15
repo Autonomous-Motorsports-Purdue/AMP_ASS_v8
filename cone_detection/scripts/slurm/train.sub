@@ -1,0 +1,196 @@
+#!/bin/bash
+# Task 4 baseline on a Purdue RCAC GPU cluster (Gilbreth / Gautschi / Scholar).
+#
+#   sbatch scripts/slurm/train.sub                       # defaults = the baseline
+#   sbatch --export=ALL,EPOCHS=1,FRACTION=0.02,RUN_NAME=smoke scripts/slurm/train.sub
+#   sbatch --export=ALL,IMGSZ=640,RUN_NAME=p2_640 scripts/slurm/train.sub   # task 7
+#
+# Submit from the project root (SLURM_SUBMIT_DIR is used as the project root).
+# Everything tunable is an env var with a default, so the file itself rarely
+# needs editing. See scripts/slurm/README.md for one-time setup.
+
+#SBATCH --job-name=cone-p2-1280
+#SBATCH --account=CHANGE_ME            # `slist` shows the accounts you can charge
+#SBATCH --partition=CHANGE_ME          # Gilbreth: your PI queue, or `standby` (4 h cap)
+#SBATCH --nodes=1
+#SBATCH --ntasks=1                     # 1 task: ultralytics spawns its own DDP workers
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=64G
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+
+# ---- constraints you may want -------------------------------------------
+# Gilbreth is heterogeneous; `sfeatures` lists what each node has.
+##SBATCH --constraint=A100
+# Multi-GPU on one node: raise --gres, then set DEVICE=0,1,2,3 and a FIXED
+# BATCH (AutoBatch is unreliable under DDP).
+##SBATCH --gres=gpu:4
+
+set -euo pipefail
+
+# ---- knobs ---------------------------------------------------------------
+PROJECT="${SLURM_SUBMIT_DIR:-$PWD}"
+RUN_NAME="${RUN_NAME:-base_p2_1280}"
+MODEL_DIR="${MODEL_DIR:-yolo26n}"   # per-model workspace: yolo26n | rfdetr
+MODEL="${MODEL:-yolo26n-p2.yaml}"
+IMGSZ="${IMGSZ:-1280}"
+EPOCHS="${EPOCHS:-100}"
+BATCH="${BATCH:--1}"                   # -1 = AutoBatch, CUDA only
+DEVICE="${DEVICE:-0}"                  # "0" | "0,1,2,3"
+FRACTION="${FRACTION:-1.0}"
+CONDA_ENV="${CONDA_ENV:-cone}"
+# Dataset root on the cluster. Must be on scratch - 5.7 GB dereferenced, and
+# home is capped at 25 GB.
+DATA_ROOT="${DATA_ROOT:-$RCAC_SCRATCH/aks-cone-detection/data/merged}"
+# Copy the dataset to the node's local SSD first. Worth it at 1280 where the
+# dataloader is the bottleneck; costs a few minutes of startup.
+STAGE_LOCAL="${STAGE_LOCAL:-1}"
+# Resubmit ourselves to finish the remaining epochs if the walltime runs out.
+CHAIN="${CHAIN:-1}"
+CHAIN_MAX="${CHAIN_MAX:-12}"
+CHAIN_N="${CHAIN_N:-1}"
+
+cd "$PROJECT"
+mkdir -p logs
+
+echo "=================================================================="
+echo " job      : ${SLURM_JOB_ID:-local}  (chain link $CHAIN_N/$CHAIN_MAX)"
+echo " node     : $(hostname)"
+echo " run      : $RUN_NAME   model=$MODEL imgsz=$IMGSZ epochs=$EPOCHS"
+echo " project  : $PROJECT"
+echo "=================================================================="
+
+# ---- environment ---------------------------------------------------------
+module --force purge
+module load modtree/gpu 2>/dev/null || true
+module load conda
+module load cuda || true
+# `conda activate` needs the shell hook; a bare module load does not provide it.
+eval "$(conda shell.bash hook)"
+conda activate "$CONDA_ENV"
+
+# Keep every cache off $HOME (25 GB quota) and out of the read-only app tree.
+export YOLO_CONFIG_DIR="$RCAC_SCRATCH/.ultralytics"
+export MPLCONFIGDIR="$RCAC_SCRATCH/.matplotlib"
+export TORCH_HOME="$RCAC_SCRATCH/.torch"
+export HF_HOME="$RCAC_SCRATCH/.hf"
+mkdir -p "$YOLO_CONFIG_DIR" "$MPLCONFIGDIR" "$TORCH_HOME"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+export WANDB_MODE=disabled
+export COMET_MODE=disabled
+
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
+python -c "import torch,ultralytics;print(f'torch {torch.__version__} cuda={torch.cuda.is_available()} n={torch.cuda.device_count()} | ultralytics {ultralytics.__version__}')"
+
+# Point ultralytics' own dirs into the project, same as the Mac does.
+yolo settings runs_dir="$PROJECT/$MODEL_DIR/runs" weights_dir="$PROJECT/weights" \
+     datasets_dir="$(dirname "$DATA_ROOT")" >/dev/null 2>&1 || true
+
+# ---- stage the dataset ---------------------------------------------------
+if [[ ! -d "$DATA_ROOT/train/images" ]]; then
+  echo "[FATAL] no dataset at $DATA_ROOT - run scripts/slurm/sync_to_rcac.sh first" >&2
+  exit 1
+fi
+
+# Remember the shared-scratch path: the chain's next link lands on a different
+# node, where the staged copy under $TMPDIR no longer exists.
+DATA_ROOT_ORIG="$DATA_ROOT"
+if [[ "$STAGE_LOCAL" == "1" && -n "${TMPDIR:-}" && -d "$TMPDIR" ]]; then
+  LOCAL="$TMPDIR/cone_data"
+  echo "[stage] $DATA_ROOT -> $LOCAL"
+  mkdir -p "$LOCAL"
+  # -a keeps the split layout; the source is hardlinked so this expands to ~5.7 GB.
+  rsync -a --info=progress2 "$DATA_ROOT/" "$LOCAL/"
+  DATA_ROOT="$LOCAL"
+fi
+
+# ---- dataset yaml --------------------------------------------------------
+# configs/cone.yaml is written by merge.py with an ABSOLUTE Mac path, and
+# ultralytics resolves a relative `path:` against the CWD rather than the
+# yaml. So generate a job-local copy pointing at wherever the data actually
+# landed, and never hand-edit the checked-in one.
+DATA_YAML="$PROJECT/$MODEL_DIR/runs/$RUN_NAME/cone.cluster.yaml"
+mkdir -p "$(dirname "$DATA_YAML")"
+cat > "$DATA_YAML" <<YAML
+# generated by scripts/slurm/train.sub for job ${SLURM_JOB_ID:-local} - do not edit
+path: $DATA_ROOT
+train: train/images
+val: val/images
+test: test/images
+
+nc: 1
+names:
+  0: cone
+YAML
+echo "[data] $DATA_ROOT  (train=$(ls "$DATA_ROOT/train/images" | wc -l) val=$(ls "$DATA_ROOT/val/images" | wc -l))"
+
+# ---- resume if a checkpoint from an earlier link exists ------------------
+RESUME_FLAG=""
+LAST="$PROJECT/$MODEL_DIR/runs/$RUN_NAME/weights/last.pt"
+if [[ -f "$LAST" ]]; then
+  echo "[resume] found $LAST"
+  RESUME_FLAG="--resume"
+fi
+
+# ---- leave a margin so the tail of this script always runs ---------------
+# Without it the walltime kill lands mid-epoch and nothing gets resubmitted.
+MARGIN="${MARGIN:-600}"
+if [[ -n "${SLURM_JOB_END_TIME:-}" ]]; then
+  BUDGET=$(( SLURM_JOB_END_TIME - $(date +%s) - MARGIN ))
+else
+  BUDGET=$(( 4 * 3600 - MARGIN ))
+fi
+(( BUDGET < 300 )) && BUDGET=300
+echo "[time] giving training ${BUDGET}s before graceful stop"
+
+# ---- train ---------------------------------------------------------------
+set +e
+timeout --signal=INT "${BUDGET}" \
+python scripts/train.py \
+  --data    "$DATA_YAML" \
+  --model   "$MODEL" \
+  --imgsz   "$IMGSZ" \
+  --epochs  "$EPOCHS" \
+  --batch   "$BATCH" \
+  --device  "$DEVICE" \
+  --workers "${SLURM_CPUS_PER_TASK:-8}" \
+  --fraction "$FRACTION" \
+  --name    "$RUN_NAME" \
+  --notes   "rcac ${SLURM_JOB_ID:-local} $(hostname) chain=$CHAIN_N" \
+  $RESUME_FLAG
+RC=$?
+set -e
+echo "[train] exit $RC"
+
+# ---- finished, or out of time? -------------------------------------------
+BEST="$PROJECT/$MODEL_DIR/runs/$RUN_NAME/weights/best.pt"
+DONE=0
+if [[ $RC -eq 0 && -f "$BEST" ]]; then
+  DONE=1
+fi
+
+if [[ $DONE -eq 1 ]]; then
+  echo "[eval] bucketed recall against $BEST"
+  python scripts/eval_buckets.py --weights "$BEST" --run "$RUN_NAME" || true
+  echo "[done] weights: $BEST"
+  exit 0
+fi
+
+# 124 = timeout fired. Anything else that left a last.pt is also resumable.
+if [[ "$CHAIN" == "1" ]] && { [[ -f "$LAST" ]] || (( RC == 124 )); }; then
+  if (( CHAIN_N < CHAIN_MAX )); then
+    echo "[chain] out of walltime - resubmitting link $((CHAIN_N + 1))"
+    sbatch --export=ALL,RUN_NAME="$RUN_NAME",MODEL="$MODEL",IMGSZ="$IMGSZ",\
+EPOCHS="$EPOCHS",BATCH="$BATCH",DEVICE="$DEVICE",FRACTION="$FRACTION",\
+DATA_ROOT="$DATA_ROOT_ORIG",STAGE_LOCAL="$STAGE_LOCAL",\
+CHAIN="$CHAIN",CHAIN_MAX="$CHAIN_MAX",CHAIN_N="$((CHAIN_N + 1))" \
+      "$PROJECT/scripts/slurm/train.sub"
+    exit 0
+  fi
+  echo "[chain] hit CHAIN_MAX=$CHAIN_MAX without finishing" >&2
+fi
+
+exit $RC

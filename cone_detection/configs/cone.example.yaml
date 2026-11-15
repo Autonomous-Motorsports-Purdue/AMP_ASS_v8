@@ -1,0 +1,14 @@
+# EXAMPLE ONLY. The real configs/cone.yaml is generated on each machine by
+#   python scripts/merge.py
+# and is gitignored, because `path` must be ABSOLUTE: Ultralytics resolves a
+# relative `path` against the current working directory, not this file.
+# On Colab or a cluster, write your own copy pointing at wherever the
+# dataset was unpacked (see README, "Training on Colab").
+path: /absolute/path/to/aks-cone-detection/data/merged
+train: train/images
+val: val/images
+test: test/images
+
+nc: 1
+names:
+  0: cone

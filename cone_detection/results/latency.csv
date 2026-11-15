@@ -1,0 +1,6 @@
+backend,model,imgsz,device,n,median_ms,mean_ms,p95_ms,fps,tag
+yolo,best,640,mps,30,102.61,112.01,146.68,9.75,matched640
+rfdetr,RFDETRNano,640,mps,30,1587.2,1606.15,1688.55,0.63,matched640
+yolo,best,640,mps,30,14.14,15.3,21.46,70.73,matched640_fixed
+rfdetr,RFDETRNano,640,mps,30,71.16,72.4,78.0,14.05,matched640_fixed
+yolo,best,1280,mps,50,24.15,29.32,39.75,41.4,base_p2_1280
