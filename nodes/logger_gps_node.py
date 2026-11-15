@@ -13,7 +13,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, NavSatFix
 from std_msgs.msg import Float64, Int32, Int64, String
 
-from ros2_parts.orientation import quaternion_to_yaw
+from nodes.orientation import quaternion_to_yaw
 
 FIELDS = [
     "timestamp", "latitude", "longitude", "steering", "throttle", "commanded_steer",

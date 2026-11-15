@@ -10,7 +10,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 
-from ros2_parts.orientation import quaternion_to_yaw
+from nodes.orientation import quaternion_to_yaw
 
 TIME_WINDOW_S = 20.0
 

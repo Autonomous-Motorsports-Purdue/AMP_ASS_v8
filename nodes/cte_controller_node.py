@@ -8,7 +8,7 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64, Int32
 
-from ros2_parts.geometry import cross_track_error
+from nodes.geometry import cross_track_error
 
 
 class PIDController:

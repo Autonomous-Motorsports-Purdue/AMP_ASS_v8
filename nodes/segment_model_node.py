@@ -12,7 +12,7 @@ from geometry_msgs.msg import PointStamped
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float64
 
-from ros2_parts.constants import K_P, OFFSET_MULTIPLIER
+from nodes.constants import K_P, OFFSET_MULTIPLIER
 
 
 class SegmentModelNode(Node):

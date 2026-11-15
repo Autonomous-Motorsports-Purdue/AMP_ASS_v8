@@ -10,7 +10,7 @@ from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from sensor_msgs.msg import Imu
 
-from ros2_parts.orientation import quaternion_to_yaw, yaw_to_quaternion
+from nodes.orientation import quaternion_to_yaw, yaw_to_quaternion
 
 
 class PredictiveModelNode(Node):

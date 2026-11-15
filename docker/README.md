@@ -17,7 +17,7 @@ about 270 packages including `rclpy`, `cv_bridge`, `tf2_ros`, `rviz2` and
 `colcon`. It comes from apt, which is why it never appears in
 [`requirements.txt`](../requirements.txt); that file is only for pip packages.
 
-What is not baked in is **your** package, `ros2_parts`. `ros2_stack/` is
+What is not baked in is **your** package, `ros2_parts`. The repository root is
 bind-mounted over `/amp_ws/src/ros2_parts`, so you edit on the host and
 `colcon build` inside.
 
@@ -27,7 +27,7 @@ the chosen target needs, so a laptop build never pulls the L4T image.
 
 ## Run
 
-From `ros2_stack/`, on any machine:
+From the repository root, on any machine:
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build laptop
@@ -78,7 +78,7 @@ docker compose -f docker/docker-compose.yml up -d --build laptop
 
 ### Open a shell inside the container
 
-From `ros2_stack/` on the host:
+From the repository root on the host:
 
 ```bash
 docker compose -f docker/docker-compose.yml exec laptop bash
@@ -152,12 +152,12 @@ GUI programs can also be started from the host. They appear on the noVNC
 desktop at <http://localhost:6080>:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec -T -d laptop bash -lc 'export DISPLAY=:1; . /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; exec rviz2 -d /amp/ros2_stack/config/lidar.rviz >/tmp/rviz.log 2>&1'
+docker compose -f docker/docker-compose.yml exec -T -d laptop bash -lc 'export DISPLAY=:1; . /opt/ros/humble/setup.bash; . /amp_ws/install/setup.bash; exec rviz2 -d /amp/config/lidar.rviz >/tmp/rviz.log 2>&1'
 ```
 
-These commands work in PowerShell as written when run from `ros2_stack/`.
+These commands work in PowerShell as written when run from the repository root.
 From the repository root, change the Compose path to
-`ros2_stack/docker/docker-compose.yml`. On the kart, use the `amp` service in
+`docker/docker-compose.yml`. On the kart, use the `amp` service in
 place of `laptop` after starting that service.
 
 ## Does it work?
@@ -180,7 +180,7 @@ successfully.
 
 ## The source mount is read-write
 
-`ros2_stack/` is bind-mounted read-write, which is what makes this a dev
+The repository root is bind-mounted read-write, which is what makes this a dev
 container: `colcon build --symlink-install` needs to link back into it. The
 consequence is that anything deleting files under `/amp_ws/src/ros2_parts`
 inside the container deletes them **on the host**, and Docker bind mounts do

@@ -36,7 +36,7 @@ services:
 
     volumes:
       - ..:/amp_ws/src/ros2_parts
-      - ../..:/amp
+      - ..:/amp
       - amp_build:/amp_ws/build
       - amp_install:/amp_ws/install
       - amp_log:/amp_ws/log
@@ -71,7 +71,7 @@ services:
 
     volumes:
       - ..:/amp_ws/src/ros2_parts      # the package, edited on the host
-      - ../..:/amp                     # paths, logs, ONNX models
+      - ..:/amp                        # paths, logs, ONNX models
       - amp_build_jetson:/amp_ws/build # colcon output, kept across `run --rm`
       - amp_install_jetson:/amp_ws/install
       - amp_log_jetson:/amp_ws/log

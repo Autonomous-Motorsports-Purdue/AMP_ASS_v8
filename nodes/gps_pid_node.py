@@ -9,7 +9,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float64
 
-from ros2_parts.orientation import normalize_angle_rad, quaternion_to_yaw
+from nodes.orientation import normalize_angle_rad, quaternion_to_yaw
 
 R_EARTH_M = 6378137.0
 

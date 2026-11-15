@@ -14,7 +14,7 @@ from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Float64
 
-from ros2_parts.orientation import quaternion_to_yaw
+from nodes.orientation import quaternion_to_yaw
 
 
 class MpcPartNode(Node):

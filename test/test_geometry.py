@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-from ros2_parts.geometry import cross_track_error, distance
+from nodes.geometry import cross_track_error, distance
 
 
 class TestDistance:

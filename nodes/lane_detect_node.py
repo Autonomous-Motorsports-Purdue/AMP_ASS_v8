@@ -10,7 +10,7 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 from sensor_msgs.msg import Image
 
-from ros2_parts.curve_fit_node import get_bezier, plot_bezier
+from nodes.curve_fit_node import get_bezier, plot_bezier
 
 SPECIAL_KERNEL = np.array([[0, 1, 1, 1, 0]] * 5, np.uint8)
 

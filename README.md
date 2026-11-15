@@ -3,4 +3,212 @@
 A new iteration of our Autonomous Software Stack (ASS) for 2026-2027.
 
 ## Software Architecture
+
 <img width="750" height="800" alt="AMP_AKS_2026_Software_Diagram drawio(3)" src="https://github.com/user-attachments/assets/0dd5da7e-b93e-452b-bc0c-207b36d5cf3e" />
+
+## ros2_parts
+
+ROS 2 Humble nodes for the AMP autonomous software stack on Ubuntu 22.04.
+Every component is a plain `rclpy` node speaking standard ROS interfaces.
+
+## Shape of a node
+
+Each file is one `rclpy.node.Node` subclass that opens its own hardware,
+subscribes to what it needs and publishes real messages. There is no framework
+layer between the node and ROS — what you see in the file is what runs:
+
+```python
+# in: serial IMU lines | out: imu/data (Imu)
+class ImuNode(Node):
+    def __init__(self):
+        super().__init__("imu")
+        port = self.declare_parameter("port", "/dev/ttyACM1").value
+        self.ser = serial.Serial(port, 115200, timeout=1)
+        self.pub = self.create_publisher(Imu, "imu/data", qos_profile_sensor_data)
+        self.create_timer(1.0 / rate_hz, self.run)
+```
+
+Each file starts with a one-line `# in: ... | out: ...` comment. Timer-driven
+callbacks are conventionally named `run`.
+
+Two small modules are shared: [`orientation.py`](ros2_parts/orientation.py)
+(quaternion and angle conversions) and [`geometry.py`](ros2_parts/geometry.py)
+(the cross-track error).
+
+Sensor nodes publish on a timer; everything downstream is event-driven off its
+primary input, except the filters and loggers, which sample the latest of
+several inputs on a timer.
+
+## Interfaces
+
+Sensors, poses and images use the standard messages, so the graph works with
+`rviz2`, `ros2 bag`, `tf2` and `robot_localization` as-is:
+
+| Topic | Type |
+| --- | --- |
+| `imu/data` | `sensor_msgs/Imu` |
+| `lidar/points` | `sensor_msgs/PointCloud2` |
+| `lidar/occupancy_grid` | `nav_msgs/OccupancyGrid` |
+| `gps/fix`, `gps/fused_fix`, `gps/ekf_fix` | `sensor_msgs/NavSatFix` |
+| `gps/vel`, `gps/ekf_vel` | `geometry_msgs/TwistStamped` |
+| `gps/pose`, `predicted_pose` | `geometry_msgs/PoseStamped` |
+| `odometry/filtered` | `nav_msgs/Odometry` |
+| `camera/*/image_raw`, `perception/*_mask`, `perception/*_image` | `sensor_msgs/Image` |
+| `perception/centroid`, `perception/waypoint`, `perception/waypoint_ground` | `geometry_msgs/PointStamped` |
+| `perception/midline` | `nav_msgs/Path` |
+
+Actuator commands stay scalar on purpose. The kart takes a normalised steering
+value and a throttle in eRPM, and there is no honest conversion to
+`geometry_msgs/Twist` (which is a velocity) or `ackermann_msgs/AckermannDrive`
+(which wants a steering angle in radians and a speed in m/s). Dressing them up
+as either would misstate the units:
+
+| Topic | Type | Meaning |
+| --- | --- | --- |
+| `cmd/steering`, `cmd/auto_steering`, `cmd/user_steering` | `std_msgs/Float64` | normalised, -1 (left) to 1 (right) |
+| `cmd/throttle`, `cmd/auto_throttle`, `cmd/user_throttle` | `std_msgs/Float64` | eRPM, or normalised from the camera stack |
+| `cmd/commanded_steering`, `cmd/commanded_throttle` | `std_msgs/Float64` | what the UART actually sent |
+| `safety/heartbeat` | `std_msgs/Bool` | false stops the kart |
+| `gps/fix_type` | `std_msgs/String` | `RTK FIXED` etc., which `NavSatStatus` cannot express |
+
+## Build
+
+```bash
+mkdir -p ~/amp_ws/src
+ln -s /path/to/AMP_ASS_v8 ~/amp_ws/src/ros2_parts
+
+cd ~/amp_ws
+rosdep install --from-paths src --ignore-src -r -y
+pip install -r src/ros2_parts/requirements.txt
+colcon build --packages-select ros2_parts
+source install/setup.bash
+```
+
+Each node only imports what it needs, so a machine that never runs the ZED,
+ONNX or GStreamer nodes does not need those libraries.
+
+## Run
+
+```bash
+# The complete CTE stack
+ros2 launch ros2_parts cte.launch.py path_csv:=/abs/path/to/path_xy_throttle.csv
+
+# Or one node at a time
+ros2 run ros2_parts gps --ros-args -p port:=/dev/ttyACM0
+ros2 topic echo /gps/fix
+```
+
+The main stacks are [`cte.launch.py`](launch/cte.launch.py),
+[`gps_pid.launch.py`](launch/gps_pid.launch.py), and
+[`pursuit.launch.py`](launch/pursuit.launch.py), each with a matching file in
+[`config/`](config/).
+[`lidar.launch.py`](launch/lidar.launch.py) receives Velodyne UDP packets on
+port `2368` and publishes point-cloud and occupancy-grid topics.
+
+## Nodes
+
+`ros2 run ros2_parts <executable>`. Every node takes `rate_hz` where it drives
+a loop; other parameters are listed at the top of each node's `__init__`.
+
+| Part | Executable | Subscribes | Publishes |
+| --- | --- | --- | --- |
+| `bno086.py` | `bno086` | — | `imu/data` |
+| `control_mux.py` | `control_mux` | user + auto commands | `cmd/steering`, `cmd/throttle` |
+| `controller.py` | `mpc_part` | `gps/pose` | `cmd/desired_yaw_rate`, `cmd/desired_speed` |
+| `controller.py` | `closed_loop_controller` | desired rate, `imu/data` | `cmd/steering`, `cmd/throttle` |
+| `cte_controller.py` | `cte_controller` | `odometry/filtered` | commands, `controller/cross_track_error`, `controller/waypoint_index` |
+| `curve_fit.py` | `curve_fit` | `perception/drivable_mask` | `perception/waypoint`, `perception/curve_image` |
+| `ekf_localizer.py` | `ekf_localizer` | `gps/fix`, `imu/data` | `gps/ekf_fix`, `gps/ekf_vel` |
+| `fake_gps.py` | `fake_gps` | — | `gps/fix`, `gps/fix_type` |
+| `fake_imu.py` | `fake_imu` | — | `imu/data` |
+| `frame_publisher.py` | `frame_publisher` | — | `camera/{left,right}/image_raw` |
+| `gps.py` | `gps` | — | `gps/fix`, `gps/vel`, `gps/fix_type` |
+| `gps_csv.py` | `gps_csv` | — | `gps/fix`, `gps/fix_type`, replayed from a CSV |
+| `gps_pid.py` | `gps_pid` | `gps/pose` | `cmd/steering`, `cmd/throttle` |
+| `gps_to_xy.py` | `gps_to_xy` | `gps/fix` | `gps/pose`, optional `/tf` |
+| `gps_to_xy.py` | `xy_to_gps` | `odometry/filtered` | `gps/fused_fix` |
+| `gps_visualizer.py` | `gps_visualizer` | `gps/fix`, `imu/data` | — |
+| `gstreamer_video_sync.py` | `gstreamer_video_sync` | `loop/*` | `video/*` |
+| `heading_fusion.py` | `heading_fusion` | `gps/pose`, `gps/vel`, `imu/data` | `odometry/filtered` |
+| `health_check.py` | `health_check` | — | `safety/heartbeat` |
+| `image_cv.py` | `image_cv` | `camera/image_raw` | detection image, centroid, area |
+| `image_publisher.py` | `image_publisher` | — | `camera/image_raw` |
+| `imu.py` | `imu` | — | `imu/data` |
+| `imu_visualizer.py` | `imu_visualizer` | `imu/data` | — |
+| `lane_detect.py` | `lane_detect` | `camera/left/image_raw` | `perception/midline`, annotated image |
+| `lidar` | `lidar` | Velodyne UDP on port `2368` | `lidar/points`, `lidar/occupancy_grid` |
+| `log.py` | `log` | object centroid, area | — |
+| `logger.py` | `logger` | frames + commands | — |
+| `logger2.py` | `logger2` | any `Float64` topics (`topics` param) | — |
+| `logger_gps.py` | `logger_gps` | the whole run | — |
+| `loop_clock.py` | `loop_clock` | — | `loop/index`, `loop/monotonic_ns` |
+| `onnx.py` | `onnx` | `camera/image_raw` | `perception/{lane,drivable}_mask` |
+| `predictive_model.py` | `predictive_model` | `gps/pose`, `gps/vel`, `imu/data` | `predicted_pose` |
+| `preprocessor.py` | `preprocessor` | `camera/image_raw` | `camera/image_preprocessed` |
+| `pure_pursuit.py` | `pure_pursuit` | `perception/waypoint_ground` | `cmd/auto_{steering,throttle}` |
+| `pure_pursuit_controller.py` | `pure_pursuit_controller` | `odometry/filtered` | commands |
+| `segment_model.py` | `segment_model` | `camera/left/image_raw` | segmented image, centroid, commands |
+| `test.py` | `test` | — | `cmd/user_{steering,throttle}` |
+| `threaded_socket_pub_part.py` | `threaded_socket_pub` | fixes, odometry, IMU, steering | — (TCP) |
+| `translate.py` | `translate` | `perception/waypoint` | `perception/waypoint_ground` |
+| `uart.py` | `uart` | commands, heartbeat | — |
+| `uart_backup.py` | `uart_backup` | commands, heartbeat, `gps/fix_type` | `cmd/commanded_*` |
+| `uart_backup2.py` | `uart_backup2` | `cmd/raw_throttle` | — (bench rig) |
+| `zed_frame_publisher.py` | `zed_frame_publisher` | — | ZED left/right/depth images |
+
+## Behaviour changes worth knowing
+
+The algorithms are unchanged. These are the places where moving onto standard
+messages changed a number, and each one can affect how the kart drives:
+
+* **Yaw rate is radians per second.** This is the unit required by
+  `sensor_msgs/Imu`; closed-loop controller gains must be tuned for that unit.
+* **The EKF gets its heading in degrees.** It is derived from the orientation
+  quaternion before the body-to-world rotation is calculated.
+* **IMU accuracy rides in `orientation_covariance`.** `heading_fusion` reads
+  its rejection threshold from there rather than from a separate topic.
+* **The health check is optional.** The real socket check is gated behind
+  `enabled`, which defaults to false.
+* **The UART nodes fail safe.** A heartbeat or fix topic that has never been
+  published now stops the kart, rather than being read as a missing value.
+
+Smaller notes:
+
+* `curve_fit` and `lane_detect` each took an input their bodies never read (the
+  lane mask and the depth frame); those subscriptions are gone.
+* `cte_controller` computed a path-curvature feed-forward that was commented
+  out of the final steering, and `segment_model` computed an offset-to-throttle
+  curve it then overrode with a constant. Neither took effect, so neither is
+  carried over.
+* `logger2` now names its topics by parameter. For anything you intend to keep,
+  `ros2 bag record` is the better tool.
+* Dead code is omitted: `cte_controller`'s
+  zero-step prediction (so it no longer needs `gps/pose` or `gps/vel`),
+  `pure_pursuit`'s speed logic that was always overwritten by the constant
+  speed, and `pure_pursuit_controller`'s debug dictionary.
+* `gps` no longer publishes HDOP, satellite count or correction age on their
+  own topics; nothing read them. HDOP still sets the fix covariance.
+* Tuning constants nothing in `config/` overrides are plain module constants
+  at the top of each node rather than ROS parameters.
+* `bno086`'s `wrap360` added 361 degrees to negative angles. Python's modulo
+  never produces one, so the branch was dead; it is 360 here.
+
+## The cross-track sign
+
+`cte_controller` uses the local helpers in
+[`geometry.py`](ros2_parts/geometry.py).
+
+The sign matters — it decides which way the kart steers off-path. Positive
+error means the kart is left of the path, which the PID turns into a rightward
+correction. The convention is pinned by
+[`test_geometry.py`](test/test_geometry.py). **Confirm it on the kart at low
+speed before trusting it at pace.**
+
+## Test
+
+```bash
+colcon test --packages-select ros2_parts && colcon test-result --verbose
+```
+
+The tests cover the two shared modules the nodes depend on for correctness: the
+path geometry and the orientation conversions.

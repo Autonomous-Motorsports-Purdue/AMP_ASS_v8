@@ -9,7 +9,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 import serial
 
-from ros2_parts.orientation import (
+from nodes.orientation import (
     compass_heading_to_enu_yaw_deg,
     enu_yaw_to_compass_heading_deg,
     normalize_quaternion,

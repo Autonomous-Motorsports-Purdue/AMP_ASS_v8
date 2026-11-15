@@ -6,7 +6,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 
-from ros2_parts.orientation import yaw_to_quaternion
+from nodes.orientation import yaw_to_quaternion
 
 
 class FakeImuNode(Node):

@@ -11,7 +11,7 @@ from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 
-from ros2_parts.orientation import normalize_angle_rad, quaternion_to_yaw, yaw_to_quaternion
+from nodes.orientation import normalize_angle_rad, quaternion_to_yaw, yaw_to_quaternion
 
 GPS_POSITION_VAR = 0.10 ** 2
 GPS_VELOCITY_VAR = 0.10 ** 2

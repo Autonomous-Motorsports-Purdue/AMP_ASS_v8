@@ -9,7 +9,7 @@
 // To work against the Jetson image instead, change "service" to "amp".
 {
   "name": "ros2_parts (laptop)",
-  "dockerComposeFile": ["../ros2_stack/docker/docker-compose.yml"],
+  "dockerComposeFile": ["../docker/docker-compose.yml"],
   "service": "laptop",
 
   // Must correspond to the host folder you opened in VS Code. You open

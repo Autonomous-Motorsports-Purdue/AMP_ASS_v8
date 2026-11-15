@@ -11,7 +11,7 @@ from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import TwistStamped
 from sensor_msgs.msg import Imu, NavSatFix, NavSatStatus
 
-from ros2_parts.orientation import quaternion_to_yaw
+from nodes.orientation import quaternion_to_yaw
 
 R_EARTH = 6378137.0
 RAD2DEG = 180.0 / np.pi

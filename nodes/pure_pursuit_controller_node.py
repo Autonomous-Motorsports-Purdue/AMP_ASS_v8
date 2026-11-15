@@ -8,7 +8,7 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
 
-from ros2_parts.orientation import normalize_angle_deg, quaternion_to_yaw
+from nodes.orientation import normalize_angle_deg, quaternion_to_yaw
 
 WHEELBASE_M = 1.05
 STEER_MAX_RAD = math.radians(25.0)

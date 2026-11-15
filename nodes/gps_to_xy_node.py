@@ -9,7 +9,7 @@ from geometry_msgs.msg import PoseStamped, TransformStamped
 from sensor_msgs.msg import NavSatFix, NavSatStatus
 from tf2_ros import TransformBroadcaster
 
-from ros2_parts.orientation import yaw_to_quaternion
+from nodes.orientation import yaw_to_quaternion
 
 EARTH_RADIUS_M = 6378137.0  # WGS84 equatorial radius
 
