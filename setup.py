@@ -19,8 +19,6 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Cole Byrne',
-    maintainer_email='colewbyrne@gmail.com',
     description='ROS 2 nodes for the AMP autonomous software stack.',
     license='Apache-2.0',
     tests_require=['pytest'],

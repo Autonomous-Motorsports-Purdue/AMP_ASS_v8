@@ -25,6 +25,7 @@ NODES = [
     'cte_controller',
     'threaded_socket_pub',
     'logger_gps',
+    'lidar',
 ]
 
 #: Nodes that need the waypoint file passed through.
