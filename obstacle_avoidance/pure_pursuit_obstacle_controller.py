@@ -24,6 +24,7 @@ class PurePursuitController:
         fallback_erpm=1500,
         steering_sign=1.0,
     ):
+        # Load the path. Each row is [s, x, y, heading, curvature, motor_erpm]
         line = self._load_line(path_csv, fallback_erpm)
         if len(line) < 3:
             raise ValueError(f"PurePursuitController needs at least 3 points: {path_csv}")
@@ -78,12 +79,29 @@ class PurePursuitController:
 
         return np.column_stack([s_m, x, y, psi, kappa, erpm])
 
+    # Replace the path being followed
+    def set_path(self, x_m, y_m, psi_rad, target_erpm):
+        x = np.asarray(x_m, dtype=float)
+        y = np.asarray(y_m, dtype=float)
+        psi = np.asarray(psi_rad, dtype=float)
+        if len(x) < 3:
+            raise ValueError("set_path needs at least 3 points")
+        seg = np.hypot(np.diff(x), np.diff(y))
+        self.s_m = np.concatenate(([0.0], np.cumsum(seg)))
+        self.path_x_m = x
+        self.path_y_m = y
+        self.path_psi_rad = psi
+        self.path_kappa = np.zeros(len(x))
+        self.target_erpm = np.asarray(target_erpm).astype(int)
+        self.closest_idx = 0
+
     def find_closest_idx_forward(self, x_m, y_m):
         distances = np.hypot(self.path_x_m - x_m ,self.path_y_m - y_m)
         self.closest_idx = int(np.argmin(distances))
         return self.closest_idx, float(distances[self.closest_idx])
 
 
+    # Walk along the path from closest_idx for lookahead_m meters
     def _pick_lookahead_target(self, closest_idx, lookahead_m):
         n = len(self.path_x_m)
         remaining = float(lookahead_m)
@@ -111,14 +129,23 @@ class PurePursuitController:
         return closest_idx, float(self.path_x_m[closest_idx]), float(self.path_y_m[closest_idx])
 
     def run(self, x, y, yaw_deg, speed_mps):
+        # Computer motor and steering commands for the vehicle
+
+        # x, y : vehicle position (m)
+        # yaw_deg : vehicle heading (deg)
+        # speed_mps : vehicle speed (m/s)
+        # returns (throttle_erpm, steer_norm)
+
         x_m, y_m = float(x), float(y)
         yaw_rad = math.radians(float(yaw_deg))
         speed_mps = max(0.0, float(speed_mps))
 
+        # Lookahead grows with speed, clip to range
         closest_idx, _ = self.find_closest_idx_forward(x_m, y_m)
         lookahead_m = float(np.clip(speed_mps * self.lookahead_time_s, self.min_lookahead_m, self.max_lookahead_m))
         target_idx, target_x, target_y = self._pick_lookahead_target(closest_idx, lookahead_m)
 
+        # Express target in vehicles frame
         dx, dy = target_x - x_m, target_y - y_m
         cos_yaw, sin_yaw = math.cos(yaw_rad), math.sin(yaw_rad)
 
@@ -129,6 +156,7 @@ class PurePursuitController:
         if lookahead_sq < 1e-6:
             return int(self.target_erpm[target_idx]), 0.0, None
 
+        # Curvature of the arc through the vehicle and the target
         curvature = 2.0 * y_veh / lookahead_sq
         bicycle_steer = math.atan(self.wheelbase_m * curvature) / self.steer_max_rad
         steer_norm = float(np.clip(self.steering_sign * bicycle_steer, -1.0, 1.0))

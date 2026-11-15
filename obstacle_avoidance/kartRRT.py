@@ -9,40 +9,48 @@ from scipy.spatial import cKDTree
 def clip(val, low, high):
     return low if val < low else (high if val > high else val)
 
+def wrap_angle(a):
+    return math.atan2(math.sin(a), math.cos(a))
+
+# Grow every occupied cell of grid
+# Makes obstacles appear larger so planned path keeps kart body clear
 def inflate(grid, resolution, max_radius):
-    radius_cells = max(1, int(math.ceil(max_radius / resolution)))
-    struct = iterate_structure(generate_binary_structure(2, 1), radius_cells)
-    return binary_dilation(grid, structure=struct)
+    r = max(1, int(math.ceil(max_radius / resolution)))
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    disk = (xx * xx + yy * yy) <= r * r
+    return binary_dilation(grid, structure=disk)
 
 ## RRT Stuff
 class RRTNode:
-    def __init__(self, x, y, heading, steering, parent=None):
+    # One node in the search tree
+    def __init__(self, x, y, heading, steering, parent=None, traj=None):
         self.x = x
         self.y = y
         self.heading = heading
         self.steering = steering
         self.parent = parent
+        self.traj = traj
 
 ## Basic RRT
 class KartRRT:
     def __init__(
             self,
             grid,
-            resolution=0.2,
-            wheelbase=1,
-            k_length=1.0,
-            k_width=1.0,
-            max_steer=30.0,
-            max_steer_rate=90.0,
-            speed=3.0,
-            body_points=3,
-            edge_dt=0.3,
-            sim_dt=0.08,
-            steer_fan=7,
-            iters=180,
-            sample_rate=0.45,
-            goal_xy_threshold=1.2,
-            goal_yaw_threshold=math.radians(35),
+            resolution=0.2, # meters per grid cell
+            wheelbase=1,    # axle-to-axle distance (m)
+            k_length=1.0,   # kart length (m)
+            k_width=1.0,    # kart width (m)
+            max_steer=30.0, # max steering angle (deg)
+            max_steer_rate=90.0, # max steering speed (deg/s)
+            speed=3.0, # speed for simulation (m/s)
+            body_points=3, # how many points along body are collision checked
+            edge_dt=0.3, # duration of each arc grown by steer_torward (s)
+            sim_dt=0.08, # integration step (s) for bicycle model
+            steer_fan=7, # number of discrete steering angles to try
+            iters=180, # maximum number of sampling iterations
+            sample_rate=0.45, # chance of sampling goal instead of a random point
+            goal_xy_threshold=1.2, # how close (m) the final point must be to goal
+            goal_yaw_threshold=math.radians(35), # how close (rad) heading must be to goal
             rng_seed=None,
     ):
         self.grid = grid
@@ -66,24 +74,31 @@ class KartRRT:
         self.sample_rate = sample_rate
         self.goal_xy_threshold = goal_xy_threshold
         self.goal_yaw_threshold = goal_yaw_threshold
-        self.rng_seed = random.Random(rng_seed)
+        self.rng = random.Random(rng_seed)
 
+        # Precompute list of free cell centers to sample from
+        free = np.argwhere(~grid)
+        if len(free):
+            self.free_xy = np.column_stack([(free[:, 1] + 0.5) * resolution,
+                                            (free[:, 0] + 0.5) * resolution])
+        else:
+            self.free_xy = None
+
+        # Points along kart centerline at which collision is checked
         half_len = self.kart_length / 2.0
         self.body_offsets = np.linspace(-half_len, half_len, self.body_points)
 
     def point_free(self, x, y):
-        ## Check if point is outside of obstacle
-        px, py = int(x / self.resolution), int(y / self.resolution)
+        px = math.floor(x / self.resolution)
+        py = math.floor(y / self.resolution)
         if px < 0 or py < 0 or px >= self.width or py >= self.height:
             return False
         return not self.grid[py, px]
-
+    
     def pose_free(self, x, y, heading):
         cos_h, sin_h = math.cos(heading), math.sin(heading)
         for offset in self.body_offsets:
-            px = x + offset * cos_h
-            py = y + offset * sin_h
-            if not self.point_free(px, py):
+            if not self.point_free(x + offset * cos_h, y + offset * sin_h):
                 return False
         return True
 
@@ -95,14 +110,13 @@ class KartRRT:
         n_steps = max(1, int(round(duration / self.sim_dt)))
         current_steering = steering
         max_delta = self.max_steer_rate * self.sim_dt
-
+ 
         for _ in range(n_steps):
             delta = clip(target_steering - current_steering, -max_delta, max_delta)
             current_steering = clip(current_steering + delta, -self.max_steer, self.max_steer)
             x += self.speed * math.cos(heading) * self.sim_dt
             y += self.speed * math.sin(heading) * self.sim_dt
-            heading += (self.speed / self.wheelbase) * math.tan(current_steering) * self.sim_dt
-            heading = math.atan2(math.sin(heading), math.cos(heading))
+            heading = wrap_angle(heading + (self.speed / self.wheelbase) * math.tan(current_steering) * self.sim_dt)
             xs.append(x)
             ys.append(y)
             headings.append(heading)
@@ -110,15 +124,18 @@ class KartRRT:
         return xs, ys, headings, steerings
 
     def steer_toward(self, nearest, sample):
+        # Try to grow tree from nearest towards sample
         desired_heading = math.atan2(sample[1] - nearest.y, sample[0] - nearest.x)
-        heading_error = math.atan2(math.sin(desired_heading - nearest.heading), math.cos(desired_heading - nearest.heading))
+        heading_error = wrap_angle(desired_heading - nearest.heading)
         target_steering = clip(heading_error, -self.max_steer, self.max_steer)
-        candidate = min(self.steer_candidates, key=lambda x: abs(x - target_steering))
-        xs, ys, headings, steerings = self.simulate(nearest.x, nearest.y, nearest.heading, nearest.steering, candidate, self.edge_dt)
-
+        candidate = min(self.steer_candidates, key=lambda s: abs(s - target_steering))
+        xs, ys, headings, steerings = self.simulate(
+            nearest.x, nearest.y, nearest.heading, nearest.steering, candidate, self.edge_dt)
+ 
         if not self.edge_free(xs, ys, headings):
             return None
-        return RRTNode(xs[-1], ys[-1], headings[-1], steerings[-1], parent=nearest)
+        return RRTNode(xs[-1], ys[-1], headings[-1], steerings[-1], parent=nearest,
+                       traj=(xs[1:], ys[1:], headings[1:], steerings[1:]))
 
     def try_reach_goal(self, node, goal):
         """Dedicated fine-grained simulation to connect directly to goal pose."""
@@ -135,52 +152,64 @@ class KartRRT:
                 continue
                 
             final_dist = math.hypot(xs[-1] - goal[0], ys[-1] - goal[1])
-            h_err = abs(math.atan2(math.sin(headings[-1] - goal[2]), math.cos(headings[-1] - goal[2])))
-            
+            h_err = abs(wrap_angle(headings[-1] - goal[2]))
             if final_dist < self.goal_xy_threshold and h_err < self.goal_yaw_threshold:
-                return RRTNode(xs[-1], ys[-1], headings[-1], steerings[-1], parent=node)
+                return RRTNode(xs[-1], ys[-1], headings[-1], steerings[-1], parent=node,
+                               traj=(xs[1:], ys[1:], headings[1:], steerings[1:]))
         return None
     
-    def plan(self, start, goal):
+    def plan(self, start, goal, start_steer=0.0):
+        """
+        start: (x, y, heading) in grid metres, goal: (x, y, heading) in grid metres.
+        Returns (path, info). path is an (M, 4) array of [x, y, heading, steering]
+        sampled at sim_dt along the collision-checked arcs, or None if no path found.
+        """
         t0 = time.perf_counter()
-        nodes = [RRTNode(start[0], start[1], start[2], 0.0)]
+        root = RRTNode(start[0], start[1], start[2], start_steer)
+        nodes = [root]
         node_coords = [(start[0], start[1])]
         goal_node = None
-
-        for iter in range(self.iters):
-            if self.rng_seed.random() < self.sample_rate:
+        it = 0
+ 
+        for it in range(self.iters):
+            if self.rng.random() < self.sample_rate:
                 px, py = goal[0], goal[1]
+            elif self.free_xy is not None:
+                px, py = self.free_xy[self.rng.randrange(len(self.free_xy))]
             else:
-                px = self.rng_seed.uniform(0, self.width * self.resolution)
-                py = self.rng_seed.uniform(0, self.height * self.resolution)
-
+                break
+ 
             tree = cKDTree(node_coords)
             _, idx = tree.query([px, py])
             nearest = nodes[idx]
-
+ 
             new_node = self.steer_toward(nearest, (px, py))
             if new_node is None:
                 continue
-
+ 
             nodes.append(new_node)
             node_coords.append((new_node.x, new_node.y))
-
-            direct_goal_node = self.try_reach_goal(new_node, goal)
-            if direct_goal_node is not None:
-                goal_node = direct_goal_node
+ 
+            direct = self.try_reach_goal(new_node, goal)
+            if direct is not None:
+                goal_node = direct
                 nodes.append(goal_node)
                 break
-
-        elapsed = time.perf_counter() - t0
-        info = {"time": elapsed, "iterations": iter + 1, "nodes": len(nodes), "found": goal_node is not None}
-
+ 
+        info = {"time": time.perf_counter() - t0, "iterations": it + 1,
+                "nodes": len(nodes), "found": goal_node is not None}
         if goal_node is None:
-            return None, nodes, info
-
-        path = []
-        current = goal_node
-        while current is not None:
-            path.append((current.x, current.y, current.heading, current.steering))
-            current = current.parent
-        path.reverse()
-        return path, nodes, info
+            return None, info
+ 
+        chain = []
+        cur = goal_node
+        while cur.parent is not None:
+            chain.append(cur.traj)
+            cur = cur.parent
+        chain.reverse()
+ 
+        rows = [(root.x, root.y, root.heading, root.steering)]
+        for xs, ys, hs, ss in chain:
+            rows.extend(zip(xs, ys, hs, ss))
+        return np.array(rows, dtype=float), info
+ 

@@ -306,6 +306,34 @@ def read_from_file(file_path):
               f"Obstacles/scan -> min {min(obstacle_counts)}, "
               f"max {max(obstacle_counts)}, avg {sum(obstacle_counts)/len(obstacle_counts):.1f}")
 
+def detect_obstacle_mask(grid, dilate_kernel=OBSTACLE_DILATE_KERNEL, min_area=MIN_OBSTACLE_AREA):
+    """Same filtering as detect_obstacles(), but also returns a boolean mask
+    covering the kept blobs (for planning). Mask is in grid cell coordinates."""
+    if dilate_kernel > 1:
+        kernel = np.ones((dilate_kernel, dilate_kernel), np.uint8)
+        working = cv2.dilate(grid, kernel, iterations=1)
+    else:
+        working = grid
+ 
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(working, connectivity=8)
+ 
+    keep = np.zeros(num_labels, dtype=bool)
+    obstacles = []
+    for i in range(1, num_labels):
+        x, y, w, h, area = stats[i]
+        if area < min_area:
+            continue
+        if max(w, h) * GRID_RES < MIN_OBSTACLE_DIM_M:
+            continue
+        cx, cy = centroids[i]
+        keep[i] = True
+        obstacles.append({"x": x, "y": y, "w": w, "h": h, "area": int(area), "cx": cx, "cy": cy})
+    return obstacles, keep[labels]
+ 
+def detect_obstacles(grid, dilate_kernel=OBSTACLE_DILATE_KERNEL, min_area=MIN_OBSTACLE_AREA):
+    return detect_obstacle_mask(grid, dilate_kernel, min_area)[0]
+
+
 if __name__ == "__main__":
     if IS_LIVE:
         read_live_data()
