@@ -1,0 +1,27 @@
+# SEPARATE env - do NOT install into `cone` or `rfdetr`. DEIMv2 pins
+# torch==2.5.1 / torchvision==0.20.1; `cone` is the env env_check.py validates
+# (torch 2.14.0 / ultralytics 8.4.155) and rfdetr pins its own torch too.
+#
+#   bash scripts/setup_deimv2_env.sh
+#
+# The SOURCE OF TRUTH for the model's own deps is the clone's requirements.txt
+# (deimv2/DEIMv2/requirements.txt) - the setup script installs that FIRST, then
+# this file. Listed here are only the extras our shared scripts need on top,
+# plus the torch pin repeated so a plain `pip install -r` still lands somewhere
+# sane if you skip the setup script.
+#
+# Shared scripts (eval_buckets, predict, backends) run in ALL THREE envs; they
+# import ultralytics / rfdetr / deimv2 lazily, inside the backend function.
+
+torch==2.5.1                # upstream pin; 2.4.1 also works per their README
+torchvision==0.20.1
+faster-coco-eval>=1.6.7     # DEIMv2's evaluator
+PyYAML
+tensorboard
+scipy
+calflops
+transformers
+
+# --- needed by scripts/backends.py, predict.py, eval_buckets.py -------------
+pillow
+numpy

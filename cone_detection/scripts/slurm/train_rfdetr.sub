@@ -1,0 +1,160 @@
+#!/bin/bash
+# RF-DETR on a Purdue RCAC GPU cluster (Gilbreth / Gautschi).
+#
+#   sbatch scripts/slurm/train_rfdetr.sub
+#   sbatch --export=ALL,ARCH=RFDETRNano,RESOLUTION=640,RUN_NAME=rf_n_640 \
+#          scripts/slurm/train_rfdetr.sub
+#
+# Submit from the project root. Mirrors train.sub so both models are trained
+# under the same walltime/chaining/staging policy - otherwise the comparison
+# picks up a difference that has nothing to do with the architecture.
+
+#SBATCH --job-name=cone-rfdetr
+#SBATCH --account=CHANGE_ME            # `slist` shows what you can charge
+#SBATCH --partition=CHANGE_ME          # your PI queue, or `standby` (4 h cap)
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=96G                      # >yolo: 30.5M params + transformer activations
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+
+##SBATCH --constraint=A100             # `sfeatures` lists node features
+##SBATCH --gres=gpu:4                  # then set DEVICES=4 and STRATEGY=ddp
+
+set -euo pipefail
+
+# ---- knobs ---------------------------------------------------------------
+PROJECT="${SLURM_SUBMIT_DIR:-$PWD}"
+MODEL_DIR="rfdetr"
+ARCH="${ARCH:-RFDETRSmall}"            # Nano|Small|Medium|Base|Large
+RESOLUTION="${RESOLUTION:-1280}"       # %32 for Nano/Small/Medium/Large, %56 for Base
+RUN_NAME="${RUN_NAME:-rf_s_1280}"
+EPOCHS="${EPOCHS:-100}"
+BATCH="${BATCH:-4}"
+GRAD_ACCUM="${GRAD_ACCUM:-4}"          # effective batch = BATCH * GRAD_ACCUM
+LR="${LR:-1e-4}"
+DEVICES="${DEVICES:-1}"
+STRATEGY="${STRATEGY:-auto}"
+CONDA_ENV="${CONDA_ENV:-rfdetr}"
+DATA_ROOT="${DATA_ROOT:-$RCAC_SCRATCH/aks-cone-detection/data/merged_coco}"
+STAGE_LOCAL="${STAGE_LOCAL:-1}"
+CHAIN="${CHAIN:-1}"
+CHAIN_MAX="${CHAIN_MAX:-12}"
+CHAIN_N="${CHAIN_N:-1}"
+
+cd "$PROJECT"
+mkdir -p logs
+
+echo "=================================================================="
+echo " job    : ${SLURM_JOB_ID:-local}  (chain $CHAIN_N/$CHAIN_MAX)"
+echo " node   : $(hostname)"
+echo " run    : $RUN_NAME  $ARCH @ $RESOLUTION  epochs=$EPOCHS"
+echo " batch  : $BATCH x $GRAD_ACCUM = $((BATCH * GRAD_ACCUM)) effective"
+echo "=================================================================="
+
+# ---- environment ---------------------------------------------------------
+module --force purge
+module load modtree/gpu 2>/dev/null || true
+module load conda
+module load cuda || true
+eval "$(conda shell.bash hook)"
+conda activate "$CONDA_ENV"
+
+export TORCH_HOME="$RCAC_SCRATCH/.torch"
+export HF_HOME="$RCAC_SCRATCH/.hf"
+export MPLCONFIGDIR="$RCAC_SCRATCH/.matplotlib"
+# rfdetr downloads its pretrained backbone here; keep it off the 25 GB home quota
+export ROBOFLOW_HOME="$RCAC_SCRATCH/.roboflow"
+mkdir -p "$TORCH_HOME" "$HF_HOME" "$MPLCONFIGDIR" "$ROBOFLOW_HOME"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+export WANDB_MODE=disabled
+
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
+python -c "import torch,rfdetr;print(f'torch {torch.__version__} cuda={torch.cuda.is_available()} n={torch.cuda.device_count()}')"
+
+# ---- dataset -------------------------------------------------------------
+if [[ ! -f "$DATA_ROOT/train/_annotations.coco.json" ]]; then
+  echo "[FATAL] no COCO dataset at $DATA_ROOT" >&2
+  echo "        run scripts/slurm/sync_to_rcac.sh, then scripts/yolo_to_coco.py" >&2
+  exit 1
+fi
+
+DATA_ROOT_ORIG="$DATA_ROOT"
+if [[ "$STAGE_LOCAL" == "1" && -n "${TMPDIR:-}" && -d "$TMPDIR" ]]; then
+  LOCAL="$TMPDIR/cone_coco"
+  echo "[stage] $DATA_ROOT -> $LOCAL"
+  mkdir -p "$LOCAL"
+  rsync -a --info=progress2 "$DATA_ROOT/" "$LOCAL/"
+  DATA_ROOT="$LOCAL"
+fi
+echo "[data] $DATA_ROOT  (train=$(ls "$DATA_ROOT/train" | wc -l) files)"
+
+# ---- resume --------------------------------------------------------------
+OUT="$PROJECT/$MODEL_DIR/runs/$RUN_NAME"
+RESUME_FLAG=""
+if [[ -f "$OUT/last.ckpt" ]]; then
+  echo "[resume] found $OUT/last.ckpt"
+  RESUME_FLAG="--resume $OUT/last.ckpt"
+fi
+
+# ---- walltime margin so the tail always runs -----------------------------
+MARGIN="${MARGIN:-900}"    # rf-detr checkpoints are ~500 MB; give it room
+if [[ -n "${SLURM_JOB_END_TIME:-}" ]]; then
+  BUDGET=$(( SLURM_JOB_END_TIME - $(date +%s) - MARGIN ))
+else
+  BUDGET=$(( 4 * 3600 - MARGIN ))
+fi
+(( BUDGET < 300 )) && BUDGET=300
+echo "[time] giving training ${BUDGET}s before graceful stop"
+
+# ---- train ---------------------------------------------------------------
+set +e
+timeout --signal=INT "${BUDGET}" \
+python scripts/train_rfdetr.py \
+  --arch       "$ARCH" \
+  --dataset    "$DATA_ROOT" \
+  --resolution "$RESOLUTION" \
+  --epochs     "$EPOCHS" \
+  --batch      "$BATCH" \
+  --grad-accum "$GRAD_ACCUM" \
+  --lr         "$LR" \
+  --workers    "${SLURM_CPUS_PER_TASK:-8}" \
+  --devices    "$DEVICES" \
+  --strategy   "$STRATEGY" \
+  --accelerator gpu \
+  --checkpoint-interval 1 \
+  --project    "$PROJECT/$MODEL_DIR/runs" \
+  --name       "$RUN_NAME" \
+  --notes      "rcac ${SLURM_JOB_ID:-local} $(hostname) chain=$CHAIN_N" \
+  $RESUME_FLAG
+RC=$?
+set -e
+echo "[train] exit $RC"
+
+# ---- eval, or chain ------------------------------------------------------
+BEST="$OUT/checkpoint_best_ema.pth"
+if [[ $RC -eq 0 && -f "$BEST" ]]; then
+  echo "[eval] bucketed recall against $BEST"
+  python scripts/eval_buckets.py --backend rfdetr --arch "$ARCH" \
+    --weights "$BEST" --imgsz "$RESOLUTION" --run "$RUN_NAME" || true
+  echo "[done] $BEST"
+  exit 0
+fi
+
+if [[ "$CHAIN" == "1" ]] && { [[ -f "$OUT/last.ckpt" ]] || (( RC == 124 )); }; then
+  if (( CHAIN_N < CHAIN_MAX )); then
+    echo "[chain] out of walltime - resubmitting link $((CHAIN_N + 1))"
+    sbatch --export=ALL,ARCH="$ARCH",RESOLUTION="$RESOLUTION",RUN_NAME="$RUN_NAME",\
+EPOCHS="$EPOCHS",BATCH="$BATCH",GRAD_ACCUM="$GRAD_ACCUM",LR="$LR",DEVICES="$DEVICES",\
+STRATEGY="$STRATEGY",DATA_ROOT="$DATA_ROOT_ORIG",STAGE_LOCAL="$STAGE_LOCAL",\
+CHAIN="$CHAIN",CHAIN_MAX="$CHAIN_MAX",CHAIN_N="$((CHAIN_N + 1))" \
+      "$PROJECT/scripts/slurm/train_rfdetr.sub"
+    exit 0
+  fi
+  echo "[chain] hit CHAIN_MAX=$CHAIN_MAX without finishing" >&2
+fi
+exit $RC

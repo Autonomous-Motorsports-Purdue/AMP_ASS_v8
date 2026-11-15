@@ -1,0 +1,14 @@
+# SEPARATE env - do NOT install into `cone`. rfdetr pins its own torch, and
+# `cone` is the env env_check.py validates (torch 2.14.0 / ultralytics 8.4.155).
+#
+#   conda create -y -n rfdetr python=3.11 && conda activate rfdetr
+#   pip install -r requirements-rfdetr.txt
+#
+# Shared scripts (eval_buckets, predict, backends) run in BOTH envs; they
+# import ultralytics or rfdetr lazily, inside the backend function.
+
+rfdetr[train,loggers]   # [train] is REQUIRED: the bare package is inference-only
+supervision
+pillow
+pyyaml
+numpy

@@ -1,0 +1,46 @@
+# datasets - never commit images
+data/
+*.zip
+*.tar
+*.tar.gz
+
+# training artefacts
+runs/
+*.pt
+*.pth
+*.ckpt
+*.engine
+*.onnx
+weights/*.pt
+
+# DEIMv2 is a clone, not a package - it is an install, not our source.
+# $DEIMV2_HOME can point somewhere else entirely (scratch, on a cluster).
+deimv2/DEIMv2/
+ckpts/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# keep the run log and inventories - they are the record of the project
+!results/
+results/*.json
+!results/runs.csv
+
+# rendered predictions - regenerate with scripts/predict.py
+viz/
+
+# the one deployable model, so the Jetson can `git pull` it (6 MB).
+# Engines stay ignored: they only run on the device that built them.
+!models/*.pt
+
+# camera_loop.py --save output
+*.mp4
+
+# generated per machine by merge.py / make_subset.py (absolute paths)
+configs/cone.yaml
+configs/cone_subset_*.yaml
+configs/*.colab.yaml
+configs/*.cluster.yaml

@@ -1,0 +1,17 @@
+# Dev / training box (x86 or Apple Silicon). Jetson uses the NVIDIA-built
+# torch wheel from the JetPack index instead - do NOT pip install torch there.
+#
+# The `cone` env (Python 3.11) is already created and verified - see README.
+#   conda activate cone
+
+ultralytics>=8.3.0
+torch
+torchvision
+opencv-python
+pillow
+pyyaml
+numpy
+imagehash        # task 3: perceptual-hash dedupe between FSOCO and AKS
+tqdm
+onnx
+onnxruntime      # task 6: ONNX export sanity-check on the dev box

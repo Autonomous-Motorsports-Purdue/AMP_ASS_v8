@@ -1,0 +1,8 @@
+timestamp,run,notes,model,weights,imgsz,epochs,batch,close_mosaic,fliplr,hsv_h,hsv_s,hsv_v,mosaic,scale,device,dataset,map50,map50_95,precision,recall,recall_10_16,recall_16_32,recall_32_64,recall_ge64,n_10_16,n_16_32,n_32_64,n_ge64,sub_floor_gt,conf_thresh,iou_thresh,engine,latency_ms_e2e,latency_ms_infer,fps,jetson
+2026-09-20T13:24:27,smoke_640,local MPS smoke test before RCAC,yolo26n.pt,pretrained-default,640,1,4,10,0.5,0.0,0.7,0.4,1.0,0.5,mps,cone.yaml,0.00781,0.0033,0.00986,0.1522,,,,,,,,,,,,,,,,
+2026-09-20T13:46:43,local_640_f10,local MPS signal run: 12x smoke optimization,yolo26n.pt,pretrained-default,640,5,8,10,0.5,0.0,0.7,0.4,1.0,0.5,mps,cone.yaml,0.25313,0.1265,0.58467,0.24904,,,,,,,,,,,,,,,,
+2026-09-20T13:57:36,local_640_f10,eval val @conf0.25,,yolo26n/runs/local_640_f10/weights/best.pt,640,,,,,,,,,,cpu,,,,0.88889,0.43636,0.06452,0.46,0.80769,0.66667,31,50,26,3,,0.25,0.5,,,,,
+2026-09-20T14:19:42,m640_yolo26n_640,matched compare @640,yolo26n.pt,pretrained-default,640,5,4,10,0.5,0.0,0.7,0.4,1.0,0.5,mps,cone_subset_010.yaml,0.56613,0.31007,0.78163,0.51073,,,,,,,,,,,,,,,,
+2026-09-20T15:03:50,m640_yolo26n_640,eval val @conf0.25,,yolo26n/runs/m640_yolo26n_640/weights/best.pt,640,,,,,,,,,,cpu,,,,0.59989,0.92614,0.88889,0.92688,0.97786,0.98795,909,930,542,83,,0.25,0.5,,,,,
+2026-09-20T15:04:31,m640_rfdetrnano_640,eval val @conf0.25,,rfdetr/runs/m640_rfdetrnano_640/checkpoint_best_ema.pth,640,,,,,,,,,,mps,,,,0.57204,0.97321,0.9505,0.98065,0.99446,1.0,909,930,542,83,,0.25,0.5,,,,,
+2026-10-17T19:22:56,base_p2_1280,eval val @conf0.25,,yolo26n/runs/base_p2_1280/weights/best.pt,1280,,,,,,,,,,mps,,,,0.71096,0.9608,0.93379,0.967,0.98071,0.99338,8367,8363,4303,2719,,0.25,0.5,,,,,
